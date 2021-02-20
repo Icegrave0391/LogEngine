@@ -31,7 +31,6 @@ class ProcessInfo:
     working_dir = "working_directory"
     args = "args"
 
-
 class SyscallInfo:
     """
     Certain fields of syscall-type data in auditbeat.auditd.data
@@ -44,6 +43,13 @@ class SyscallInfo:
     syscall = "syscall"
     arch = "arch"
     tty = "tty"
+
+class FileInfo:
+    path = "path"
+    mode = "mode"
+
+class PathsInfo:
+    name = "name"
 
 
 
@@ -142,6 +148,27 @@ class BeatState(object):
                 log.info(f"{self.__repr__()} doesn't have process info.")
             else:
                 log.info(f"{self.__repr__()} doesn't have process field {field}")
+            info = None
+        return info
+
+    def get_file_info(self, field):
+        try:
+            info = self.file[field]
+        except (KeyError, TypeError) as e:
+            if type(e) is TypeError:
+                log.info(f"{self.__repr__()} doesn't have file info.")
+            else:
+                log.info(f"{self.__repr__()} doesn't have field field {field}")
+            info = None
+        return info
+
+    def get_paths_info(self, field):
+        if self.auditd.paths is None:
+            return None
+        try:
+            info = self.auditd.paths[field]
+        except KeyError:
+            log.info(f"{self.__repr__()} doesn't have paths field {field}.")
             info = None
         return info
 
