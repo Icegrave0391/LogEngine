@@ -23,9 +23,12 @@ class ManagerBase:
                 stashes.append(beat)
         return stashes
 
-    def filter(self, filter:Callable):
+    def filter(self, filter:Callable, filter_syscall=True):
         stashes = []
-        for beat in self.beat_stashes:
+        sources = self.beat_stashes
+        if filter_syscall:
+            sources = self.filter_syscall()
+        for beat in sources:
             if filter(beat):
                 stashes.append(beat)
         return stashes
