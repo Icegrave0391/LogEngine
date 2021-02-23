@@ -43,6 +43,14 @@ class SyscallInfo:
     syscall = "syscall"
     arch = "arch"
     tty = "tty"
+    socket = "socket"
+
+class SocketInfo:
+    port = "port"
+    addr = "addr"
+    path = "path"
+    saddr = "saddr"
+    family = "family"
 
 class FileInfo:
     path = "path"
@@ -50,7 +58,6 @@ class FileInfo:
 
 class PathsInfo:
     name = "name"
-
 
 
 class Auditd(object):
@@ -97,6 +104,7 @@ class Auditd(object):
             info = None
             log.info(f"{self.__repr__()} does not have syscall field {field}.")
         return info
+
     # TODO(): support other type rather than syscall
 
 class BeatState(object):
@@ -137,8 +145,36 @@ class BeatState(object):
     def syscall_name(self):
         return self.auditd.syscall_name
 
+    @property
+    def result(self):
+        if self.auditd.result == "success":
+            return True
+        return False
+
+    @property
+    def has_socket(self):
+        return SyscallInfo.socket in self.auditd.syscall_info.keys()
+
     def get_syscall_info(self, field):
         return self.auditd.get_syscall_info(field)
+
+    def get_socket_info(self, field):
+        sock = self.get_syscall_info(SyscallInfo.socket)
+        try:
+            info = sock[field]
+        except (KeyError, TypeError) as e:
+            if type(e) is TypeError:
+                log.info(f"{self.__repr__()} doesn't have process info.")
+                info = None
+            else:
+                if field == SocketInfo.addr and SocketInfo.path in sock.keys():
+                    info = sock[SocketInfo.path]
+                elif field == SocketInfo.addr and SocketInfo.saddr in sock.keys():
+                    info = sock[SocketInfo.saddr]
+                else:
+                    log.info(f"{self.__repr__()} doesn't have process field {field}")
+                    info = None
+        return info
 
     def get_process_info(self, field):
         try:
@@ -162,11 +198,11 @@ class BeatState(object):
             info = None
         return info
 
-    def get_paths_info(self, field):
+    def get_paths_info(self, idx, field):
         if self.auditd.paths is None:
             return None
         try:
-            info = self.auditd.paths[field]
+            info = self.auditd.paths[idx][field]
         except KeyError:
             log.info(f"{self.__repr__()} doesn't have paths field {field}.")
             info = None
