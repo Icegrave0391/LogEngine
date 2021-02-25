@@ -9,7 +9,7 @@ import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
 
-pt_test_file = 'naive_test/pt_wget'
+pt_test_file = 'naive_test/pt_wget_withoutxed'
 
 
 class PTParser(object):
@@ -23,7 +23,7 @@ class PTParser(object):
         self.events = list()
         log.info(f'Initialized a intel_pt log parser.')
 
-    def retrieve_raw(self, filter_mode=True, custom_filters: Optional[List[re.Pattern]]=None) -> List[InsnState]:
+    def retrieve_raw(self, filter_mode=True, custom_filters: Optional[List[re.Pattern]]=None, already_xed_decode=False) -> List[InsnState]:
         """
         pre-process the raw perf script outpout file
         """
@@ -33,7 +33,10 @@ class PTParser(object):
             for line in f.readlines():
                 if filter_mode and self._raw_linefilter(line, custom_filters) is True:
                     continue
-                insn_trace = line.strip().split('\t')
+                if already_xed_decode:
+                    insn_trace = line.strip().split('\t')
+                else:
+                    insn_trace = line.strip().split("insn:")
                 insn_trace = list(filter(None, insn_trace))
 
                 if len(insn_trace) > 2 or len(insn_trace) < 1:
@@ -42,6 +45,8 @@ class PTParser(object):
                     comm_infoset, insn = insn_trace[0], None
                 else:
                     comm_infoset, insn = insn_trace
+                    if not already_xed_decode: # convert string format code to bytecode
+                        insn = self.retrieve_insn_bytecode(insn)
 
                 # extract flag field first
                 flag = re.findall(r'u:([a-zA-Z ]+)', comm_infoset)[0]
@@ -82,3 +87,13 @@ class PTParser(object):
                     return True
         return False
 
+    def retrieve_insn_bytecode(self, insn:str):
+        """
+        Convert the string type byte code (like: '48 3d 00 f0 ff ff') to bytecode
+        """
+        def to_hex(s):
+            return int(s, 16)
+        str_list = insn.strip().split()
+
+        hex_list = list(map(to_hex, str_list))
+        return bytes(hex_list)

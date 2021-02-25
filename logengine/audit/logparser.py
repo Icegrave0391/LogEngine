@@ -83,16 +83,3 @@ class LogParser():
                 # self.events.append(beat_state)
                 stashes.append(beat_state)
         return stashes
-
-
-def parse():
-    f = open('../../naive_test/auditbeat', 'r')
-    for line in f.readlines():
-        js_list.append(json.loads(line))
-
-
-if __name__ == '__main__':
-    parser = LogParser()
-    parser.parse()
-    import IPython
-    IPython.embed()

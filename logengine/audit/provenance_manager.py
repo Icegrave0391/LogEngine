@@ -6,10 +6,13 @@ from typing import List, Optional, Tuple
 from networkx import MultiDiGraph, DiGraph
 import networkx as nx
 import pygraphviz as pgv
+import logging
 
 from .beat_state import *
 from .base_manager import ManagerBase
 
+log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG)
 #~~~~~~SOCKET TYPES~~~~~~~#
 AF_NETLINK = "netlink socket"
 AF_UNIX    = "unix socket"

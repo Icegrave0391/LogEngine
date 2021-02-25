@@ -1,4 +1,5 @@
 import logging
+from typing import ByteString
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
@@ -32,7 +33,17 @@ class InsnState(object):
     def __repr__(self):
         type = 'instruction' if self.insn_type else 'branch'
         if self.insn_type:
-            return f"<InsnState ip: {hex(self.ip)}, type: {type}, insn: {self.insn}>"
+            if not isinstance(self.insn, ByteString):
+                return f"<InsnState ip: {hex(self.ip)}, type: {type}, insn: {self.insn}>"
+            else:
+                from logengine.factory import ISA, ArchInfo
+                isa_util = ISA(ArchInfo())
+                return f"<InsnState ip: {hex(self.ip)}, type: {type}, insn: {self.insn} ({isa_util.disasm(self.insn, self.ip)})>"
         else:
             return f"<InsnState ip: {hex(self.ip)}, type: {type}>"
 
+    @property
+    def is_syscall(self):
+        if self.insn == "syscall":
+            return True
+        return False
