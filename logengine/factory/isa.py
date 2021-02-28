@@ -3,9 +3,22 @@ from dataclasses import dataclass
 
 import keystone as _keystone
 import capstone as _capstone
-
+from capstone.x86 import *
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
+
+syscall_analysis_table = {
+    0  : "read",      1: "write",      2: "open",      3: "close",
+    9  : "mmap",     16: "ioctl",     22: "pipe",     32: "dup",
+    33 : "dup2",     40: "sendfile",  41: "socket",   42: "connect",
+    43 : "accept",   44: "sendto",    45: "recvfrom", 46: "sendmsg",
+    47 : "recvmsg",  49: "bind",      50: "listen",   52: "getpeername",
+    57 : "fork",     58: "vfork",     59: "execve",   62: "kill",
+    73 : "fcntl",    82: "rename",    83: "mkdir",    84: "rmdir",
+    86 : "link",     87: "unlink",   220: "clone",   240: "mq_open",
+    257: "openat",  263: "unlinkat", 265: "linkat",  293: "pipe2",
+    297: "recvmsg", 299: "recvmmsg", 307: "sendmmsg",
+}
 
 @dataclass
 class ArchInfo:
@@ -13,8 +26,6 @@ class ArchInfo:
     cs_mode = _capstone.CS_MODE_64
     ks_arch = _keystone.KS_ARCH_X86
     ks_mode = _keystone.KS_MODE_64
-
-# class syscall_table
 
 class ISA:
     """

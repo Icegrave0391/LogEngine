@@ -83,8 +83,46 @@ class Block:
     def pp(self):
         return self.capstone.pp()
 
-    # @property
-    # def is_syscall(self):
+    @property
+    def is_syscall(self):
+        last_insn = self.capstone.insns[-1]
+        """
+        syscall type
+        """
+        if last_insn.mnemonic == "syscall":
+            return True
+        return False
+
+    def block_def_use(self):
+        """
+        Find the block def-use chain (check all the instructions of register reads and writes)
+        and take do a reverse for instructions in the block (we do a backwards traversal).
+        :return: Reversed order of Tuple(address, defining values, reg_written) of instructions in the block
+        """
+        def_use = []
+        for capinsn in self.capstone.insns:
+            insn = capinsn.insn
+            regs_read, regs_write = insn.regs_access()
+            # registers being writen
+            rws = []
+            for reg_num in regs_write:
+                rws.append(insn.reg_name(reg_num))
+
+            # values should be used / defined
+            defining_vals = []
+            if regs_read:
+                # eg: mov eax, ebx ;  mov eax, dword ptr [ebx+0x1]; which means ebx should be defining value
+                for reg_num in regs_read:
+                    defining_vals.append(insn.reg_name(reg_num))
+            else:
+                # eg: mov eax, dword ptr [0x1]; no registers read.
+                # which means only [0x1] of the instruction should be defining value
+                val = [insn.disp]
+                defining_vals.append(val)
+            def_use.append((insn.address, defining_vals, rws))
+
+        def_use.reverse()
+        return def_use
 
 
 class CapstoneBlock:
@@ -97,11 +135,21 @@ class CapstoneBlock:
     def pp(self):
         print(str(self))
 
+    def get_insn(self, addr, insns):
+        """
+        get instruction (type CsInsn) from the address
+        """
+        for idx, capinsn in enumerate(insns):
+            if capinsn.insn.address == addr:
+                return idx, capinsn.insn
+        return None, None
+
     def __str__(self):
         return "\n".join(map(str, self.insns))
 
     def __repr__(self):
         return f"<CapstoneBlock for {hex(self.addr)}>"
+
 
 class CapstoneInsn:
     def __init__(self, capstone_insn):
@@ -118,4 +166,4 @@ class CapstoneInsn:
         return "%#x:\t%s\t%s" % (self.address, self.mnemonic, self.op_str)
 
     def __repr__(self):
-        return f"<CapstoneInsn {self.mnemonic} for {hex(self.address)}>"
+        return f"<CapstoneInsn {self.mnemonic} {self.op_str} for {hex(self.address)}>"

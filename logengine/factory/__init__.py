@@ -1,2 +1,5 @@
-from .isa import ISA, ArchInfo
+from .isa import ISA, ArchInfo, syscall_analysis_table
 from .block import Block, CapstoneBlock, CapstoneInsn
+
+def syscall():
+    print("haha")
