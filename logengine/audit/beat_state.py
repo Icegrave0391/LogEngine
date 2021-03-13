@@ -164,7 +164,7 @@ class BeatState(object):
             info = sock[field]
         except (KeyError, TypeError) as e:
             if type(e) is TypeError:
-                log.info(f"{self.__repr__()} doesn't have process info.")
+                log.info(f"{self.__repr__()} doesn't have socket info.")
                 info = None
             else:
                 if field == SocketInfo.addr and SocketInfo.path in sock.keys():
@@ -172,7 +172,7 @@ class BeatState(object):
                 elif field == SocketInfo.addr and SocketInfo.saddr in sock.keys():
                     info = sock[SocketInfo.saddr]
                 else:
-                    log.info(f"{self.__repr__()} doesn't have process field {field}")
+                    log.info(f"{self.__repr__()} doesn't have socket field {field}")
                     info = None
         return info
 
@@ -207,20 +207,3 @@ class BeatState(object):
             log.info(f"{self.__repr__()} doesn't have paths field {field}.")
             info = None
         return info
-
-if __name__ == "__main__":
-    # tester
-    data = {
-            "a0": "7f0a21020d60",
-            "a2": "7f0a21020168",
-            "a1": "80000",
-            "arch": "x86_64",
-            "a3": "6f732e6572637062",
-            "tty": "pts4",
-            "exit": "3",
-            "syscall": "open"
-        }
-    aud = Auditd([], "syscall", 1, "success", data, "")
-    print(aud.syscall_name)
-    print(aud.get_syscall_info(SyscallInfo.a1))
-

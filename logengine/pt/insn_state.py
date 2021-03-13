@@ -47,3 +47,12 @@ class InsnState(object):
         if self.insn == "syscall":
             return True
         return False
+
+    def plt_info(self):
+        """
+        determine whether the instruction is a call to @plt, return the callee plt function name if true
+        """
+        loc = self.sym.find("@plt")
+        if loc >= 0:
+            return True, self.sym[:loc]
+        return False, None

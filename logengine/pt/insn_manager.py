@@ -40,6 +40,16 @@ class InsnManager:
                 stashes.append(insn)
         return stashes
 
+    def get_insn(self, addr, stashes: List[InsnState]):
+        """
+        Get insn from address
+        """
+        for istate in stashes:
+            if istate.ip == addr:
+                return istate
+        log.warning(f"Did not find InsnState at address {hex(addr)}")
+        return None
+
     def generate_bytestring(self, insns: List[InsnState]):
         """
         Generate code-bytestring from given textual assembly instructions

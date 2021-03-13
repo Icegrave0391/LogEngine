@@ -78,7 +78,7 @@ class PTParser(object):
         # Default filters
         for p in compiled_patterns:
             if p.search(line) is not None:
-                log.info(f'filtered line: {line}')
+                # log.info(f'filtered line: {line}')
                 return True
         # Custom filters
         if custom_filters is not None:

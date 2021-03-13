@@ -185,6 +185,7 @@ class ProvenanceManager(ManagerBase):
             callee_exec = beat.get_process_info(ProcessInfo.exec)
             callee_pid = beat.get_process_info(ProcessInfo.pid)
             # generate node
+            return
 
         if sys_name == "open":
             """
@@ -194,6 +195,7 @@ class ProvenanceManager(ManagerBase):
             callee_fd = beat.get_syscall_info(SyscallInfo.exit)  # sys_open returns fd
             # assign fd_map
             self.assign_fd_map(caller_pid, caller_exec, callee_fd, callee_fpath)
+            return
 
         if sys_name == "close":
             """
@@ -214,6 +216,7 @@ class ProvenanceManager(ManagerBase):
             #     v_node = n
             # # add edge
             # self.add_edge(u_node, v_node, sys_name)
+            return
 
         if sys_name == "read":
             """
@@ -225,6 +228,7 @@ class ProvenanceManager(ManagerBase):
             u_node = ProvenanceNode(type=NodeType.file, fd=callee_fd, fpath=callee_fpath)
             v_node = ProvenanceNode(type=NodeType.process, pid=caller_pid, exec=caller_exec)
             self.add_edge(u_node, v_node, sys_name)
+            return
 
         if sys_name == "write":
             """
@@ -236,6 +240,7 @@ class ProvenanceManager(ManagerBase):
             u_node = ProvenanceNode(type=NodeType.process, pid=caller_pid, exec=caller_exec)
             v_node = ProvenanceNode(type=NodeType.file, fd=callee_fd, fpath=callee_fpath)
             self.add_edge(u_node, v_node, sys_name)
+            return
 
         if sys_name == "socket":
             """
@@ -247,6 +252,7 @@ class ProvenanceManager(ManagerBase):
                 self.assign_fd_map(caller_pid, caller_exec, callee_fd, AF_NETLINK)
             else:
                 self.assign_fd_map(caller_pid, caller_exec, callee_fd, SOCKET)
+            return
 
         if sys_name == "connect":
             """
@@ -269,6 +275,7 @@ class ProvenanceManager(ManagerBase):
 
                 v_node = ProvenanceNode(type=NodeType.socket, fd=sockfd, addr=sockaddr, port=sockport)
                 self.add_edge(u_node, v_node, sys_name)
+            return
 
         if sys_name in ["sendmsg", "sengmmsg", "send", "sendto"]:
             """
@@ -283,21 +290,33 @@ class ProvenanceManager(ManagerBase):
             u_node = ProvenanceNode(type=NodeType.process, pid=caller_pid, exec=caller_exec)
             v_node = ProvenanceNode(type=NodeType.socket, fd=sockfd, addr=addr, port=port)
             self.add_edge(u_node, v_node, sys_name)
+            return
 
         if sys_name in ["recv", "recvfrom", "recvmsg"]:
             """
             <process> recv <socket>   // process <- sockfd
             """
             sockfd = beat.get_syscall_info(SyscallInfo.a0)
-            if self.get_fd_map(caller_pid, caller_exec, sockfd) == AF_NETLINK:
+            if self.get_fd_map(caller_pid, caller_exec, sockfd) == AF_NETLINK: # ipc
                 addr = beat.get_socket_info(SocketInfo.saddr)
                 port = None
             else:
                 addr = beat.get_socket_info(SocketInfo.addr)
                 port = beat.get_socket_info(SocketInfo.port)
+                # no SocketInfo in auditd log, try to resolve by fd_map
+                if addr is None and port is None:
+                    addr, port = re.findall(f"addr: (.*), port: (.*)",
+                                            self.get_fd_map(caller_pid, caller_exec, sockfd))[0]
+
             u_node = ProvenanceNode(type=NodeType.socket, fd=sockfd, addr=addr, port=port)
             v_node = ProvenanceNode(type=NodeType.process, pid=caller_pid, exec=caller_exec)
             self.add_edge(u_node, v_node, sys_name)
+
+            return
+
+        else:
+            log.warning(f"syscall_analyzer couldn't handle syscall: {sys_name} yet.")
+        pass
 
     def construct_pn_graph(self, stashes: List[BeatState]):
         """
