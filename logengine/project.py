@@ -34,7 +34,6 @@ class Project:
         self.isa_util = isa_util
         self.fpath_audit = audit_log_file
         self.fpath_pt = pt_log_file
-
         self._pt_stashes = None
         self._audit_stashes = None
 
@@ -190,10 +189,27 @@ class Project:
 
         return syscall_blocks
 
-    def create_angr_project(self, execution):
+    def create_angr_project(self, execution="/Users/chuqiz/2021/capstone/toy_pt/toy"):
         """
-        Create a whole angr.project via the project's execution file
+        Create a whole angr.project via the project's execution file, and rebase the base_addr
+        according to the pt trace (due to PIE, the binary is not loaded at vmem 0x400000 in memory)
         """
+        log.info(f"creating an angr.Project from binary {execution}")
+        from cle import Loader
+
+        """ 1. load by cle at default vmem base, to locate the entry offset """
+        load = Loader(execution, auto_load_libs=False, use_system_libs=False)
+        _start_offset = load.main_object.entry - load.main_object.mapped_base
+
+        base_addr = self.proc_pt_stashes[0].ip - _start_offset
+        log.info(f"The main binary has been loaded rebased at {hex(base_addr)} to align PT log.")
+        """ 2. create project """
+        load_options = {
+            "main_opts": {"base_addr": base_addr},
+            "auto_load_libs": False,
+        }
+        angr_proj = angr.Project(execution, load_options=load_options)
+        return angr_proj
 
 
     @deprecated(version='1.0', reason='Should start a angr.project via the whole binary now')

@@ -9,6 +9,24 @@ import angr
 import os
 from typing import Any, Dict
 from pathlib import Path
+from networkx.drawing.nx_agraph import write_dot
+
+def magic_graph_print(filename, dependency_graph):
+    root_dir = "LogEngine"
+    file_dir = "graphs"
+    abs_dir = os.path.abspath(os.path.dirname(__name__))
+    abs_dir = abs_dir[: abs_dir.find(root_dir) + len(root_dir)]
+    abs_dir = os.path.join(abs_dir, file_dir)
+    if not os.path.exists(abs_dir):
+        os.makedirs(abs_dir)
+
+    path_and_filename = os.path.join(
+        abs_dir, filename
+    )
+
+    write_dot(dependency_graph, "%s.dot" % path_and_filename)
+    os.system("dot -Tpdf -o %s.pdf %s.dot" % (path_and_filename, path_and_filename))
+    os.system("dot -Tsvg -o %s.svg %s.dot" % (path_and_filename, path_and_filename))
 
 
 class Visualize:
@@ -80,7 +98,7 @@ class Visualize:
                 first = fir + '>'
 
             if sec == "<<SimProc":
-                str(edge[1])
+                second = str(edge[1])
             else:
                 second = sec + '>'
 
