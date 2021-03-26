@@ -3,8 +3,6 @@ import logging
 from visualize import magic_graph_print as mgp
 log = logging.getLogger(__name__)
 
-
-
 import angr
 from angr.analyses.reaching_definitions import ReachingDefinitionsAnalysis
 from angr.analyses.reaching_definitions.function_handler import FunctionHandler
@@ -73,20 +71,23 @@ class NaiveHandler(FunctionHandler):
 
         # determine whether to handle a plt function
         self.handle_plt = (local_function.is_plt, function_address)
-        print(f"handling local function: {local_function.name}")
+
+        log.info(f"ReachingDefinitionAnalysis handling local function: {local_function.name}")
+
         """1. get parent's rd-state & rda"""
         parent_rdstate = state
         parent_rda = self._analyses
 
-        # import IPython; IPython.embed()
-        # import ipdb; ipdb.set_trace()
-        # self.push_local_func_stack(function_address)
-        # self.clear_live_definitions(self.current_local_func_addr, parent_rdstate.live_definitions)
-
-        """2. get the function's all exit point and types, to create observation points,
+        """2. get the function's all exit point and types, to create observation points.
               e.g. for `ret`, an observation point OP_BEFORE is needed;
                    for `call`, an observation point OP_AFTER is needed;
                    for `transition` (jump), for example @plt functions, an observation point OP_AFTER is needed.
+
+              Moreover, for plt functions, observed_result of `OP_AFTER`s in RDA won't be
+              updated after the handle_external due to the call order of `insn_observe` and `_process_block_end`
+              at `engine_vex.py`, so it's necessary to manually update them.
+
+              *:RESOLVED:*: use `node` level observe for OP_AFTER
         """
         # get all the endpoints of the function and these types
         ob_before, ob_after = [], []
@@ -103,8 +104,10 @@ class NaiveHandler(FunctionHandler):
         aset.update(call_points)
 
         for c_t_node in aset:
-            b = local_function.get_block(c_t_node.addr)
-            ob_after.append(("insn", b.capstone.insns[-1].address, OP_AFTER))   # all the call&transition instruction address
+            # b = local_function.get_block(c_t_node.addr)
+            # ob_after.append(("insn", b.capstone.insns[-1].address, OP_AFTER))   # all the call&transition instruction address
+            # use node level observe to record
+            ob_after.append(("node", c_t_node.addr, OP_AFTER))
 
         """3. pass the parent's structures and execute child RDA,
               it's important to observe those exit points for merge
@@ -127,32 +130,36 @@ class NaiveHandler(FunctionHandler):
             canonical_size=parent_rda._canonical_size
         )
 
-        """3. construct the child's reaching definition state, as merging all the live_definitions at the local_function's
-              exit points. (defined by step 2.)
+        """3. construct the child's reaching definition state, as merging all the live_definitions at the
+              local_function's exit points. (defined by step 2.)
         """
 
         child_rdstate = parent_rdstate
         live_defs: LiveDefinitions = child_rdstate.live_definitions
-
         for k in ob_points:
             result_defs = child_rda.observed_results[k]
-            live_defs = live_defs.merge(result_defs)
 
+            """
+            Merge observed_results' live_definitions. For plt functions, I think, there should be only one
+            observe_point, and we should use overwrite=True to take a strong replacement.
+            i.e.:   read(buf1) -> read(buf1) -> here, the same buf1's definition should be at the 2nd read,
+                    and the definition of buf1 at 1st read should be overwritten.
+            Maybe, for those rda have only one exit point (observe point), we should take 'overwrite=True'.
+            """
+            overwrite = True if self.handle_plt else False
+            live_defs = live_defs.merge(result_defs, overwrite=overwrite)
         child_rdstate.live_definitions = live_defs
+
         return True, child_rdstate, child_rda.visited_blocks, child_rda.dep_graph
-
-
 
     def handle_fopen(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
         # just pass that, don't change state for right now
         print(f"[handle fopen] codeloc: {codeloc}")
-
         # fake test
-        fake_mem_atom = MemoryLocation(0x1, 0x1)
-        state.kill_and_add_definition(atom=fake_mem_atom, code_loc=codeloc, data=UNDEFINED, tags={ParameterTag(metadata="fake")})
-
+        # fake_mem_atom = MemoryLocation(0x1, 0x1)
+        # state.kill_and_add_definition(atom=fake_mem_atom, code_loc=codeloc, data=UNDEFINED, tags={ParameterTag(metadata="fake")})
         # plt-case
-        self.update_plt_observe(state.analysis, state.live_definitions)
+        # self.update_plt_observe(state.analysis, state.live_definitions)
         return True, state
 
     def handle_fclose(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
@@ -182,17 +189,13 @@ class NaiveHandler(FunctionHandler):
         for arg in args:
             arg_atoms.append(Atom.from_argument(arg, self.project.arch.registers))
 
-        """1. add use for current definitions, indicating that the parameters have passed on"""
-        for reg_atom in arg_atoms:
-            state.add_use(reg_atom, codeloc)
-
-        """2. determine the definition value, to create relevant memorylocation,
-              and add definitions
-        """
-
-        # 2.1 first get all the current live_definitions relative to rdi
+        """prototype - preparation"""
+        # get all the current live_definitions relative to rdi
         rdi_data, rdi_atom = set(), arg_atoms[0]
         rdi_current_defs: Iterable[Definition] = state.register_definitions.get_objects_by_offset(rdi_atom.reg_offset)
+        # get all the current live_definitions relative to rsi
+        rsi_data, rsi_atom = set(), arg_atoms[1]
+        rsi_current_defs: Iterable[Definition] = state.register_definitions.get_objects_by_offset(rsi_atom.reg_offset)
         # get all defined data
         for rdi_def in rdi_current_defs:
             rdi_data.update(rdi_def.data)
@@ -200,26 +203,36 @@ class NaiveHandler(FunctionHandler):
             rdi_data.add(UNDEFINED)
             state.kill_and_add_definition(rdi_atom, codeloc, rdi_data)
 
-        # 2.2 get all the current live_definitions relative to rsi
-        rsi_data, rsi_atom = set(), arg_atoms[1]
-        rsi_current_defs: Iterable[Definition] = state.register_definitions.get_objects_by_offset(rsi_atom.reg_offset)
         for rsi_def in rsi_current_defs:
             rsi_data.update(rsi_def.data)
         if len(rsi_data) == 0:
             rsi_data.add(UNDEFINED)
             state.kill_and_add_definition(rsi_atom, codeloc, rsi_data)
 
-        # 2.3 create all the certain memory locs
+        """0. delete already exist memdefs of rdi represented, it must be done here, because delete_definition will also
+              clear relevant state.codeloc_use.
+              thus it's necessary to delete exist definitions before adding those registers uses.
+        """
+        for mem_addr in rdi_data:
+            if self.definition_data_represent_address(mem_addr):
+                exist_memdefs: Iterable[Definition] = state.memory_definitions.get_objects_by_offset(mem_addr)
+                for memdef in exist_memdefs:
+                    state.kill_definitions(memdef.atom, memdef.codeloc)
+
+        """1. add use for current definitions, indicating that the parameters have passed on"""
+        for reg_atom in arg_atoms:
+            state.add_use(reg_atom, codeloc)
+
+        """2. determine the definition value, to create relevant memorylocation, and do:
+              * delete already-exsited that certain memory-location defs (no)// updated: not do here
+              * add new memory-location definition (yes)
+        """
+        # create all the certain memory locs
         for mem_addr in rdi_data:
             if type(mem_addr) is Undefined:
                 log.info('Memory address undefined, ins_addr = %#x.', codeloc.ins_addr)
             else:
-                if (
-                    isinstance(mem_addr, int) or
-                    (isinstance(mem_addr, SpOffset) and isinstance(mem_addr.offset, int)) or
-                    (isinstance(mem_addr, HeapAddress) and isinstance(mem_addr.value, int))
-                ):
-
+                if self.definition_data_represent_address(mem_addr):
                     # handle a resolvable address
                     ## get the maximum size
                     max_sz = 1
@@ -234,12 +247,16 @@ class NaiveHandler(FunctionHandler):
                                                                         })}
                     memloc = MemoryLocation(mem_addr, max_sz)
 
+                    # delete existed definitions (deprecated.) can not delete here. it will clear those relevant state.codeloc_uses
+                    # exist_memdefs: Iterable[Definition] = state.memory_definitions.get_objects_by_offset(mem_addr)
+                    # for memdef in exist_memdefs:
+                    #     state.kill_definitions(memdef.atom, memdef.codeloc)
+
                     # add definitions
                     state.kill_and_add_definition(memloc, codeloc, UNDEFINED, tags=tags)
 
         # self.update_live_definitions(self.current_local_func_addr, state.live_definitions)
-
-        # import ipdb; ipdb.set_trace()
+        # self.update_plt_observe(state.analysis, state.live_definitions)
         return True, state
 
 
@@ -268,6 +285,7 @@ class NaiveHandler(FunctionHandler):
         # 2.1 first get all the current live_definitions relative to rdi
         rdi_data, rdi_atom = set(), arg_atoms[0]
         rdi_current_defs: Iterable[Definition] = state.register_definitions.get_objects_by_offset(rdi_atom.reg_offset)
+
         # get all defined data
         for rdi_def in rdi_current_defs:
             rdi_data.update(rdi_def.data)
@@ -275,6 +293,20 @@ class NaiveHandler(FunctionHandler):
             rdi_data.add(UNDEFINED)
             state.kill_and_add_definition(rdi_atom, codeloc, rdi_data)
 
-        # state.memory_definitions.
+        # 2.2 add dependency
+        for mem_addr in rdi_data:
+            if self.definition_data_represent_address(mem_addr):
+                memdefs: Iterable[Definition] = state.memory_definitions.get_objects_by_offset(mem_addr)
+                for memdef in memdefs:
+                    state.add_use_by_def(memdef, codeloc)
+
         import ipdb;ipdb.set_trace()
         import IPython;IPython.embed()
+        return True, state
+
+    def definition_data_represent_address(self, mem_addr):
+        return (
+            isinstance(mem_addr, int) or
+            (isinstance(mem_addr, SpOffset) and isinstance(mem_addr.offset, int)) or
+            (isinstance(mem_addr, HeapAddress) and isinstance(mem_addr.value, int))
+        )

@@ -1,0 +1,40 @@
+strict digraph "" {
+	"fd: 3
+path: /lib/x86_64-linux-gnu/libc.so.6" -> "exec: /home/chuqi/capstone/toy_pt/toy
+pid: 22118"	 [label=read];
+	"exec: /home/chuqi/capstone/toy_pt/toy
+pid: 22118" -> "fd: 3
+path: /home/chuqi/capstone/toy_pt/filewu.txt"	 [label=write];
+	"exec: /home/chuqi/capstone/toy_pt/toy
+pid: 22118" -> "fd: 3
+path: /home/chuqi/capstone/toy_pt/filewk.txt"	 [label=write];
+	"exec: /home/chuqi/capstone/toy_pt/toy
+pid: 22118" -> "sockfd: 3
+addr: 127.0.0.1
+port: 65432"	 [label=sendto];
+	"exec: /home/chuqi/capstone/toy_pt/toy
+pid: 22118" -> "fd: 4
+path: /home/chuqi/capstone/toy_pt/filews.txt"	 [label=write];
+	"fd: 3
+path: /home/chuqi/capstone/toy_pt/file1u.txt" -> "exec: /home/chuqi/capstone/toy_pt/toy
+pid: 22118"	 [label=read];
+	"fd: 3
+path: /home/chuqi/capstone/toy_pt/file2u.txt" -> "exec: /home/chuqi/capstone/toy_pt/toy
+pid: 22118"	 [label=read];
+	"fd: 3
+path: /home/chuqi/capstone/toy_pt/file3u.txt" -> "exec: /home/chuqi/capstone/toy_pt/toy
+pid: 22118"	 [label=read];
+	"fd: 3
+path: /home/chuqi/capstone/toy_pt/file1k.txt" -> "exec: /home/chuqi/capstone/toy_pt/toy
+pid: 22118"	 [label=read];
+	"fd: 3
+path: /home/chuqi/capstone/toy_pt/file2k.txt" -> "exec: /home/chuqi/capstone/toy_pt/toy
+pid: 22118"	 [label=read];
+	"fd: 3
+path: /home/chuqi/capstone/toy_pt/file3k.txt" -> "exec: /home/chuqi/capstone/toy_pt/toy
+pid: 22118"	 [label=read];
+	"sockfd: 3
+addr: 127.0.0.1
+port: 65432" -> "exec: /home/chuqi/capstone/toy_pt/toy
+pid: 22118"	 [label=recvfrom];
+}

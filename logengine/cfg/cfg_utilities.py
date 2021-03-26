@@ -75,16 +75,19 @@ class CFGUtilities:
             )
         return self._kbpath
 
-    def plot_full(self):
+    def plot_full(self, name):
         abs_dir = os.path.abspath(os.path.dirname(__name__))
         abs_dir = abs_dir[: abs_dir.find(self._root_dir) + len(self._root_dir)]
-        abs_dir = os.path.join(abs_dir, self._file_dir)
+        abs_dir = os.path.join(abs_dir, "graphs")
         if not os.path.exists(abs_dir):
             os.makedirs(abs_dir)
         proj_name = os.path.basename(self.proj.filename)
-        fp = os.path.join(abs_dir, proj_name[:proj_name.find(".")])
+        if not name:
+            fp = os.path.join(abs_dir, proj_name[:proj_name.find(".")])
+        else:
+            fp = os.path.join(abs_dir, name)
         log.info(fp)
-        plot_cfg(self.cfg, fp, asminst=True, remove_imports=True, remove_path_terminator=True)
+        plot_cfg(self.cfg, fp, format="pdf", asminst=True, remove_imports=True, remove_path_terminator=True)
 
 
     def save(self):

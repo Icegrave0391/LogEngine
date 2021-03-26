@@ -10,6 +10,13 @@ import os
 from typing import Any, Dict
 from pathlib import Path
 from networkx.drawing.nx_agraph import write_dot
+from angr.analyses.reaching_definitions.dep_graph import DepGraph
+from angr.knowledge_plugins.key_definitions.atoms import Atom, Register, MemoryLocation, Parameter, Tmp
+from angr.knowledge_plugins.key_definitions.heap_address import HeapAddress
+from angr.knowledge_plugins.key_definitions.undefined import Undefined, UNDEFINED
+from angr.engines.light import RegisterOffset, SpOffset
+from angr.knowledge_plugins.key_definitions import LiveDefinitions
+from angr.knowledge_plugins.key_definitions.definition import Definition
 
 def magic_graph_print(filename, dependency_graph):
     root_dir = "LogEngine"
@@ -35,8 +42,10 @@ class Visualize:
         proj: angr.project,
         exports: Dict[str, Any]
     ):
-        self.proj = proj
+        self.proj: angr.Project = proj
         self.exports = exports
+        self._root_dir = "LogEngine"
+        self._file_dir = "graphs"
 
     def drawcfg(self, graph, start=None, end=None, name=None):
 
@@ -81,6 +90,81 @@ class Visualize:
         G = pgv.AGraph(drop + '.dot') # Read in the .dot graph
         G.draw(drop + '.png', prog='dot')  # Save the dot as a .png
 
+    def draw_dep_graph(self, dep_graph:DepGraph, name=None):
+        edges = dep_graph.edges
+        nodes = dep_graph.nodes
+        name = name if name else 'dep_graph'
+        out = nx.DiGraph()
+
+        def node(n: Definition):
+            atom_repr = ""
+            codeloc_repr = ""
+
+            atom = n.atom
+            if isinstance(atom, Register):
+                atom_repr = "Atom: <%s>" % self.proj.arch.translate_register_name(atom.reg_offset, atom.size)
+            else:
+                atom_repr = atom.__repr__()
+
+            codeloc = n.codeloc
+            if codeloc.block_addr is None:
+                codeloc_repr = '<%s>' % codeloc.sim_procedure
+
+            if codeloc.stmt_idx is None:
+                s = "<%s%#x(-)" % (
+                    ("%#x " % codeloc.ins_addr) if codeloc.ins_addr else "",
+                    codeloc.block_addr,
+                )
+            else:
+                s = "<%s%#x[%d]" % (
+                    ("%#x id=" % codeloc.ins_addr) if codeloc.ins_addr else "",
+                    codeloc.block_addr,
+                    codeloc.stmt_idx,
+                )
+
+            if codeloc.context is None:
+                s += " contextless"
+            else:
+                cstr = ""
+                for c in codeloc.context:
+                    addr = hex(c)
+                    f = self.proj.kb.functions.function(addr=c)
+                    if f:
+                        addr += f"({f.name})"
+                    addr += ','
+                    cstr += addr
+                s += cstr
+            ss = []
+            if codeloc.info:
+                for k, v in codeloc.info.items():
+                    if v != tuple() and v is not None:
+                        ss.append("%s=%s" % (k, v))
+                if ss:
+                    s += " with %s" % ", ".join(ss)
+            s += ">"
+            codeloc_repr = s
+
+            return f"<Definition <{atom_repr},\nTags: {n.tags},\nCodeloc: {codeloc_repr},\nData:{n.data}>>"
+
+        for n in nodes:
+            n = node(n)
+            out.add_node(n)
+
+        for e in edges:
+            u, v = e[0], e[1]
+            outu, outv = node(u), node(v)
+            out.add_edge(outu, outv)
+
+        abs_dir = os.path.abspath(os.path.dirname(__name__))
+        abs_dir = abs_dir[: abs_dir.find(self._root_dir) + len(self._root_dir)]
+        abs_dir = os.path.join(abs_dir, self._file_dir)
+        if not os.path.exists(abs_dir):
+            os.makedirs(abs_dir)
+        drop = os.path.join(abs_dir, name)
+        nx.drawing.nx_agraph.write_dot(out, drop + '.dot')
+        G = pgv.AGraph(drop + '.dot')
+        G.draw(drop + '.png', prog='dot')
+        G.draw(drop + '.pdf', prog='dot')
 
 
 

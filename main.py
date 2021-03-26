@@ -8,7 +8,7 @@ from logengine.project import Project
 from logengine.cfg.cfg_utilities import CFGUtilities
 
 from logengine.analyses.FunctionHandler.function_handler import NaiveHandler
-
+from visualize import Visualize as V
 import logging
 log = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ if __name__ == '__main__':
     CFGUtilities test
     """
     cfg_util = CFGUtilities(p, p.factory.entry_state())
-
+    # cfg_util.plot_full("global_cfg")
     """
     RDA test
     """
