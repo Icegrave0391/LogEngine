@@ -9,7 +9,8 @@ log.setLevel(logging.DEBUG)
 
 syscall_analysis_table = {
     0  : "read",      1: "write",      2: "open",      3: "close",
-    9  : "mmap",     16: "ioctl",     22: "pipe",     32: "dup",
+    #9  : "mmap",    16: "ioctl",
+    22: "pipe",     32: "dup",
     33 : "dup2",     40: "sendfile",  41: "socket",   42: "connect",
     43 : "accept",   44: "sendto",    45: "recvfrom", 46: "sendmsg",
     47 : "recvmsg",  49: "bind",      50: "listen",   52: "getpeername",
@@ -31,6 +32,8 @@ class ISA:
     """
     A collection of information about a given archtecture-ISA.
     """
+    syscall_analysis_table = syscall_analysis_table
+
     def __init__(self, arch: ArchInfo):
         self.arch = arch
         self._cs = None

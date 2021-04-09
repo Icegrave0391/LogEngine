@@ -83,3 +83,9 @@ class LogParser():
                 # self.events.append(beat_state)
                 stashes.append(beat_state)
         return stashes
+
+    def __getstate__(self):
+        return {k: v for k, v in self.__dict__.items()}
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)

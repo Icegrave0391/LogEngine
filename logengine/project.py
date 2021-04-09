@@ -6,6 +6,8 @@ from logengine.audit import BeatState, ProvenanceManager
 from capstone import CsInsn, CS_OP_IMM, CS_OP_REG, CS_OP_MEM
 from typing import Optional, List, Union
 
+from pathlib import Path
+import pickle
 import angr.project
 
 from deprecated.sphinx import deprecated
@@ -13,25 +15,29 @@ import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
 
+ROOT_DIR = "LogEngine"
+DB_DIR   = "database"
+
 
 
 class Project:
     """
-    The main class of logengine
+    The main class of logengine, stands for the whole workflow of the analyses.
     # TODO(): Support multi-thread or process
     """
     def __init__(self, exec: str,
                  audit_parser: LogParser=None,
                  pt_parser: PTParser=None,
                  isa_util=None,
-                 audit_log_file="./naive_test/auditbeat_toy",
-                 pt_log_file="./naive_test/pt_toy_withoutxed_nofilter"
+                 audit_log_file="./naive_test/auditbeat_wget",
+                 pt_log_file="./naive_test/pt_wget",
+                 serialize=True
                  ):
         log.info(f"Creating analysis project for {exec}...")
         self.exec = exec
         self.audit_parser = audit_parser if audit_parser is not None else LogParser(lpath=audit_log_file)
-        self.pt_parser = pt_parser if pt_parser is not None else PTParser(lpath=pt_log_file)
-        self.isa_util = isa_util
+        self.pt_parser = pt_parser if pt_parser is not None else PTParser(lpath=pt_log_file, objects=[self.exec])
+        self.isa_util: ISA = isa_util
         self.fpath_audit = audit_log_file
         self.fpath_pt = pt_log_file
         self._pt_stashes = None
@@ -41,12 +47,22 @@ class Project:
         self._audit_manger = None
         self.proc_pt_stashes = self._init_proc_ptstashes()
         self.proc_audit_stashes = self._init_proc_auditstashes()
+
+        # load binary and construct angr project
+        self.angr_proj = self.create_angr_project()
+
         # block
-        self.blockrailset = BlockRailSet()
+        self.blockrailset = BlockRailSet(self)
         # construct control flow
         self._init_controlflow_blocks()
-        # syscall chain
-        self.syscall_chain = self.construct_syscall_chain(self.blockrailset)
+
+        self._cfg_util = None
+
+        if serialize:
+            with open(self.pickle_path, "wb") as f:
+                pickle.dump(self, f)
+            log.info(f"project has been dumped to {self.pickle_path}.")
+
 
     @property
     def pt_stashes(self):
@@ -63,7 +79,7 @@ class Project:
     @property
     def pt_manager(self):
         if self._pt_manager is None:
-            self._pt_manager = InsnManager(self.pt_stashes)
+            self._pt_manager = InsnManager(self.pt_stashes, project=self)
         return self._pt_manager
 
     @property
@@ -72,12 +88,28 @@ class Project:
             self._audit_manger = ProvenanceManager(self.audit_stashes)
         return self._audit_manger
 
+    @property
+    def pickle_path(self):
+        pwd = Path(__name__)
+        file = Path(self.exec)
+        root_dir = None
+        for p in pwd.absolute().parents:
+            if p.name == ROOT_DIR:
+                root_dir = p
+
+        if not root_dir:
+            return f"/Users/chuqiz/2021/capstone/LogEngine/database/{file.stem}.dump"
+
+        return str(root_dir.joinpath(DB_DIR, file.stem + ".dump").absolute())
+
+
     def _init_proc_ptstashes(self):
         """
         filter the original pt stashes retrieved from pt trace log file,
         :return: proc_ptstashes, which are the stashes from the process beginning
         """
-        return self.pt_manager.proc_start_filter(self.exec)
+        # return self.pt_manager.proc_start_filter(self.exec)
+        return self.pt_manager.filter_insn(self.pt_stashes)
 
     def _init_proc_auditstashes(self):
         """
@@ -92,11 +124,12 @@ class Project:
 
         return self.audit_manager.filter(filter=exec_filter, filter_syscall=True)
 
-    def _init_controlflow_blocks(self):
+    def _init_controlflow_blocks(self, load_libs=False):
         """
         Recover all the basic-blocks of the process, and the control flow between those blocks.
+        Only record binary blocks and syscall blocks, without loading libc blocks.
         """
-        log.info(f"Start to generate the control flow and basic blocks...")
+        log.info(f"Start to generate the execution control flow and basic blocks...")
         # Make a shallow copy of the process's stashes
         shallow_copied = self.proc_pt_stashes.copy()
 
@@ -113,6 +146,15 @@ class Project:
             for s in bb_states:
                 shallow_copied.remove(s)
 
+            # does not load execution flow from libc, except syscall block
+            insn = bb_states[-1]
+            if (not load_libs and
+                not insn.exec == self.exec
+            ):
+                csinsn = next(self.isa_util.capstone.disasm(insn.insn, insn.ip))
+                if not csinsn.mnemonic == "syscall":
+                    continue
+
             # bytestring for basic block
             byte_string = self.pt_manager.generate_bytestring(bb_states)
             # construct the basic block
@@ -122,10 +164,46 @@ class Project:
                 project=self,
                 isa_util=self.isa_util,
                 size=None,
-                exec=bb_states[0].exec
+                exec=bb_states[0].exec,
+                insn_states=bb_states
             )
             # update railtrack
             self.blockrailset.update_rail(block=bblock)
+
+    def resolve_block_symbol(self, block: Block):
+        """
+        try to resolve a block's symbol, and update the relevant info missed before,
+        using the combination of pt's information, and the binary loader's information from angr.
+        :param block: must be a block in project's blockrailset
+        :return: symbol
+        """
+        if not block in self.blockrailset.blocks:
+            log.error(f"Block {block} is not in project {self.exec}'s blocks. Resolve failed.")
+
+        symbol = block.symbol
+        is_plt, plt_sym = block.plt_info()
+
+        if symbol == "unknown":
+            # try to resolve plt symbol
+            stub = self.angr_proj.loader.find_plt_stub_name(block.addr)
+            if stub:
+                log.info(f"plt stub: {stub} resolved for block: {block}.")
+                symbol = stub
+                for insn_state in block.insn_states:
+                    insn_state.sym = stub + "@plt"
+
+            else:
+                sym = self.angr_proj.loader.find_symbol(block.addr)
+                if sym is not None:
+                    log.info(f"symbol: {sym} resolved for block: {block}.")
+                    symbol = sym.name
+                    for insn_state in block.insn_states:
+                        insn_state.sym = symbol
+
+        elif is_plt:
+            symbol = plt_sym
+
+        return symbol
 
     def construct_provenence_graph(self,
                                    stashes: List[BeatState],
@@ -140,8 +218,8 @@ class Project:
             self.audit_manager.visualize(name=save_name)
         return graph
 
-
-    def construct_syscall_chain(self, blockrailset):
+    @deprecated(reason="should resolve from blockrailset and by symbol directly.")
+    def construct_syscall_chain(self, blockrailset, map_libc=True):
         """
         Construct a syscall chain from the control flow.
         Find all syscall blocks in the control flow.
@@ -189,7 +267,7 @@ class Project:
 
         return syscall_blocks
 
-    def create_angr_project(self, execution="/Users/chuqiz/2021/capstone/toy_pt/toy"):
+    def create_angr_project(self, execution="/Users/chuqiz/2021/capstone/wget"):
         """
         Create a whole angr.project via the project's execution file, and rebase the base_addr
         according to the pt trace (due to PIE, the binary is not loaded at vmem 0x400000 in memory)
@@ -205,7 +283,8 @@ class Project:
         log.info(f"The main binary has been loaded rebased at {hex(base_addr)} to align PT log.")
         """ 2. create project """
         load_options = {
-            "main_opts": {"base_addr": base_addr},
+            "main_opts": {"base_addr": base_addr,
+                          "debug_symbols": "/Users/chuqiz/2021/capstone/wget-dbgsym/wget.debug"},
             "auto_load_libs": False,
         }
         angr_proj = angr.Project(execution, load_options=load_options)
@@ -299,7 +378,185 @@ class Project:
                                                data=bs)
         return angr_proj
 
+    def __getstate__(self):
+        s = {k: v for k, v in self.__dict__.items() if k not in ("_audit_manager", "_pt_manager", "isa_util")}
+        return s
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.isa_util = ISA(ArchInfo())
+
+class BlockRailSet:
+    """
+    A set of blocks generated during the process's life-cycle.
+    And the execution-flow of the process will be tracked in the rail. (rail means the execution flow)
+
+    Moreover, BlockRailSet also tracks the process's execution at some critical points, like
+    execution of @plt table and syscalls we are interested in (see ISA.syscall_analysis_table).
+    """
+    def __init__(self, project=None, blocks:Optional[List[Block]]=None):
+        self.project = project
+        self._blocks = blocks if blocks else set()
+        # rail marks the ordered execution flow,
+        # the index indicates the execution sequence,
+        # and the element is the basic block's address
+        self.rail = list()
+        # plts_ marks the execution of plt table location at the rail,
+        # the index marks the sequence of plt,
+        # and the element is a Tuple(index of rail, @plt name)
+        self.plts_ = list()
+        # syscalls_ marks the execution of syscall(in syscall_analysis_table) location at the rail,
+        # the index marks the sequence of syscall,
+        # the element is a Tuple(index of rail, sys_name)
+        self.syscalls_ = list()
+        self.syscall_map = dict()
+
+    @property
+    def blocks(self):
+        return self._blocks
+
+    def get_block(self, blk_addr):
+        """
+        get a basic block from the block_address
+        """
+
+        for blk in self.blocks:
+            if blk.addr == blk_addr:
+                return blk
+
+    def get_block_from_rail_idx(self, rail_idx):
+        """
+        get block from rail index
+        """
+        try:
+            block_addr = self.rail[rail_idx]
+        except IndexError:
+            raise IndexError(f"{rail_idx} out of range {len(self.rail)}")
+
+        return self.get_block(block_addr)
+
+    def update_rail(self, block: Block):
+        """
+        update the execution flow to rail.
+        also constructs the sequence of syscalls in rail we are interested in,
+        and the sequence of @plt functions appeared in rail.
+        """
+        addr = block.addr
+        self.rail.append(addr)
+        self.blocks.add(block)
+
+        rail_idx = len(self.rail) - 1
+        # resolve potentially unknown symbol
+        if block.symbol == "unknown":
+            self.project.resolve_block_symbol(block)
+        # 1. update plts_
+        is_plt, plt_name = block.plt_info()
+        if is_plt and block.proc_name == self.project.exec:
+            self.plts_.append((rail_idx, plt_name))
+
+        # 2. update syscalls_
+        elif block.is_syscall:
+            is_interested, sys_name = block.syscall_to_analysis()
+            if is_interested:
+                sys = (rail_idx, sys_name)
+                self.syscalls_.append(sys)
+
+                # match the syscall to the latest plt
+                for i in range(len(self.plts_)-1, -1, -1):
+                    plt_rail_idx, plt_name = self.plts_[i]
+                    if plt_rail_idx <= rail_idx:
+                        self.syscall_map[sys] = (plt_rail_idx, plt_name)
+                        break
+
+
+    def get_rail_idxs(self, block):
+        addr = block.addr
+        ids = []
+        for i in range(len(self.rail)):
+            r = self.rail[i]
+            if r == addr:
+                ids.append(i)
+        return ids
+
+    def describe(self, rail_idx):
+        addr = self.rail[rail_idx]
+        blk = self.get_block(addr)
+        blk.capstone.pp()
+
+    def resolve_register(self, reg_name: str, rail_idx: int, cross_block=False):
+        """
+        resolve register value of the block
+        # TODO(): Just a prototype for resolve eax/rax now
+
+        # TODO(): the resolver could only resolve behaviors like:
+        # TODO():   mov eax, 0x10;  xor eax, eax;
+
+        :param reg_name: register name to be resolved
+        :param rail_idx: from the index in the rail (control flow)
+        :param cross_block: should make analysis between blocks
+        :return: the resolved value
+        """
+
+        # find the locate where register has been written
+
+        def dfs_find_written_insn(reg_name, rail_idx, block_rail_set, cross_block):
+            """
+            Take dfs to locate the instruction where the register 'reg_name' has been written
+            """
+            block = block_rail_set.get_block(block_rail_set.rail[rail_idx])
+            du_chain = block.block_def_use()
+
+            for item in du_chain:
+                insn_addr, definings, rws = item
+                if reg_name in rws: # search out the instruction
+                    return (item, rail_idx)
+
+            if cross_block:
+                if rail_idx  == 0:
+                    return (None, None)
+
+                return dfs_find_written_insn(reg_name=reg_name,
+                                             rail_idx=rail_idx-1,
+                                             block_rail_set=block_rail_set,
+                                             cross_block=cross_block)
+        # get the instruction in the block and the relevant rail index of the block
+        item, idx = dfs_find_written_insn(reg_name, rail_idx, self, cross_block)
+        if not item:
+            log.warning(f"Resolve register {reg_name} from rail index {rail_idx} failed.")
+            return None
+
+        rw_insn_addr = item[0]
+        loc_block: Block = self.get_block(self.rail[idx])
+
+        # take a reverse of the instructions in that block, since we should do backward traverse
+        reversed_insns = loc_block.capstone.insns.copy() # make a shallow copy
+        reversed_insns.reverse()
+
+        idx, rw_insn = loc_block.capstone.get_insn(rw_insn_addr, reversed_insns)
+
+        # retrieve the value of register
+        if rw_insn.mnemonic == "mov":
+            if rw_insn.operands[1].type == CS_OP_IMM:
+                return rw_insn.operands[1].imm
+
+        elif rw_insn.mnemonic == "xor":
+            if rw_insn.operands[1].type == CS_OP_REG:
+                if rw_insn.operands[0].reg == rw_insn.operands[1].reg: # xor reg, reg (reg <- 0)
+                    return 0
+
+        log.warning(f"Resolve register {reg_name} from rail index {rail_idx} failed.")
+        return None
+
+    def __getstate__(self):
+        s = {k:v for k,v in self.__dict__.items()}
+        return s
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
+
+##########
+##  Unfortunately, this huge class now is deprecated...
 class SyscallUnit:
     """
     A syscall unit related to the pt execution flow, which reveals syscall name, relevant block, process info
@@ -408,121 +665,3 @@ class SyscallUnit:
 
     def __repr__(self):
         return f"SyscallUnit ({self.sys_name} at {self.sys_rail_idx}) -> ({self.plt_func_name} at {self.plt_rail_idx})"
-
-
-class BlockRailSet:
-    """
-    A set of blocks generated during the process's life-cycle.
-    And the execution of the process will be tracked in the rail.
-    """
-
-    def __init__(self, blocks:Optional[List[Block]]=None):
-        self._blocks = blocks if blocks else set()
-        self.rail = list()
-
-    @property
-    def blocks(self):
-        return self._blocks
-
-    def get_block(self, blk_addr):
-        """
-        get block from the block_address
-        """
-
-        for blk in self.blocks:
-            if blk.addr == blk_addr:
-                return blk
-
-    def get_block_from_rail_idx(self, rail_idx):
-        """
-        get block from rail index
-        """
-        try:
-            block_addr = self.rail[rail_idx]
-        except IndexError:
-            raise IndexError(f"{rail_idx} out of range {len(self.rail)}")
-
-        return self.get_block(block_addr)
-
-    def update_rail(self, block):
-        addr = block.addr
-        self.rail.append(addr)
-        self.blocks.add(block)
-
-    def get_rail_idxs(self, block):
-        addr = block.addr
-        ids = []
-        for i in range(len(self.rail)):
-            r = self.rail[i]
-            if r == addr:
-                ids.append(i)
-        return ids
-
-    def describe(self, rail_idx):
-        addr = self.rail[rail_idx]
-        blk = self.get_block(addr)
-        blk.capstone.pp()
-
-    def resolve_register(self, reg_name: str, rail_idx: int, cross_block=False):
-        """
-        resolve register value of the block
-        # TODO(): Just a prototype for resolve eax/rax now
-
-        # TODO(): the resolver could only resolve behaviors like:
-        # TODO():   mov eax, 0x10;  xor eax, eax;
-
-        :param reg_name: register name to be resolved
-        :param rail_idx: from the index in the rail (control flow)
-        :param cross_block: should make analysis between blocks
-        :return: the resolved value
-        """
-
-        # find the locate where register has been written
-
-        def dfs_find_written_insn(reg_name, rail_idx, block_rail_set, cross_block):
-            """
-            Take dfs to locate the instruction where the register 'reg_name' has been written
-            """
-            block = block_rail_set.get_block(block_rail_set.rail[rail_idx])
-            du_chain = block.block_def_use()
-
-            for item in du_chain:
-                insn_addr, definings, rws = item
-                if reg_name in rws: # search out the instruction
-                    return (item, rail_idx)
-
-            if cross_block:
-                if rail_idx  == 0:
-                    return (None, None)
-
-                return dfs_find_written_insn(reg_name=reg_name,
-                                             rail_idx=rail_idx-1,
-                                             block_rail_set=block_rail_set,
-                                             cross_block=cross_block)
-        # get the instruction in the block and the relevant rail index of the block
-        item, idx = dfs_find_written_insn(reg_name, rail_idx, self, cross_block)
-        if not item:
-            log.warning(f"Resolve register {reg_name} from rail index {rail_idx} failed.")
-            return None
-
-        rw_insn_addr = item[0]
-        loc_block: Block = self.get_block(self.rail[idx])
-
-        # take a reverse of the instructions in that block, since we should do backward traverse
-        reversed_insns = loc_block.capstone.insns.copy() # make a shallow copy
-        reversed_insns.reverse()
-
-        idx, rw_insn = loc_block.capstone.get_insn(rw_insn_addr, reversed_insns)
-
-        # retrieve the value of register
-        if rw_insn.mnemonic == "mov":
-            if rw_insn.operands[1].type == CS_OP_IMM:
-                return rw_insn.operands[1].imm
-
-        elif rw_insn.mnemonic == "xor":
-            if rw_insn.operands[1].type == CS_OP_REG:
-                if rw_insn.operands[0].reg == rw_insn.operands[1].reg: # xor reg, reg (reg <- 0)
-                    return 0
-
-        log.warning(f"Resolve register {reg_name} from rail index {rail_idx} failed.")
-        return None

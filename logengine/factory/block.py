@@ -2,6 +2,7 @@ import logging
 from typing import List
 from dataclasses import dataclass
 from .isa import ISA, ArchInfo
+from logengine.pt.insn_state import InsnState
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
@@ -11,7 +12,7 @@ class Block:
     BLOCK_MAX_SIZE = 4096
 
     def __init__(self, addr, byte_string, project=None, isa_util: ISA=None, size=None, thumb=False,
-                 exec=None, pid=None):
+                 exec=None, pid=None, insn_states=None):
 
         # set up arch
         if project is not None:
@@ -27,6 +28,7 @@ class Block:
         self.thumb = thumb
         self.exec = exec
         self.pid = pid
+        self.insn_states: List[InsnState] = insn_states
         self._capstone = None
 
         if self._project is None and byte_string is None:
@@ -45,6 +47,14 @@ class Block:
         else:
             self._bytes = byte_string
 
+    def __getstate__(self):
+        return {k:v for k, v in self.__dict__.items() if k not in ("_capstone", "_project", "isa_util")}
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.isa_util = ISA(ArchInfo())
+        self._capstone = None
+
     def __repr__(self):
         return '<Block for pid: %s, addr %#x, %d bytes>' % (self.exec, self.addr, self.size)
 
@@ -61,8 +71,16 @@ class Block:
         return not self == other
 
     @property
+    def symbol(self):
+        return self.insn_states[0].sym
+
+    @property
     def bytes(self):
         return self._bytes
+
+    @property
+    def proc_name(self):
+        return self.exec
 
     @property
     def capstone(self):
@@ -92,6 +110,38 @@ class Block:
         if last_insn.mnemonic == "syscall":
             return True
         return False
+
+    @property
+    def is_return(self):
+        last_insn = self.capstone.insns[-1]
+        if last_insn.mnemonic == "ret":
+            return True
+        return False
+
+    def syscall_to_analysis(self):
+        """
+        determine whether the block represents a syscall should be analyzed,
+        a syscall should be recorded and analyzed is in isa.syscall_analysis_table.
+
+        just try to resolve the syscall
+        :return: Tuple(bool, sys_name)
+        """
+        if not self.is_syscall:
+            return False, None
+
+        # just retrive from its symbol directly
+        symbol = self.insn_states[-1].sym
+        for sys_name in self.isa_util.syscall_analysis_table.values():
+            if symbol.find(sys_name) >= 0:
+                if sys_name == "read" and symbol.find("pthread") >= 0:
+                    continue
+                return True, sys_name
+
+        return False, None
+
+
+    def plt_info(self):
+        return self.insn_states[-1].plt_info()
 
     def block_def_use(self):
         """

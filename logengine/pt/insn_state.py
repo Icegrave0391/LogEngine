@@ -42,6 +42,7 @@ class InsnState(object):
         else:
             return f"<InsnState ip: {hex(self.ip)}, type: {type}>"
 
+
     @property
     def is_syscall(self):
         if self.insn == "syscall":

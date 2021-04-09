@@ -3,13 +3,15 @@ from logengine.pt import PTParser, InsnManager
 from logengine.audit import LogParser
 from logengine.audit import ProvenanceNode, ProvenanceManager, NodeType
 from logengine.factory import ISA, ArchInfo
-from logengine.project import Project
+from logengine import Project
 
 from logengine.cfg.cfg_utilities import CFGUtilities
-
+from logengine.analyses.execution_flow import ExecutionFlow
 from logengine.analyses.FunctionHandler.function_handler import NaiveHandler
 from visualize import Visualize as V
 import logging
+import pickle
+
 log = logging.getLogger(__name__)
 
 level = logging.INFO
@@ -20,44 +22,43 @@ if __name__ == '__main__':
     log.setLevel(level)
     isa = ISA(ArchInfo())
     log.debug(f'start main')
-
-    """
-    audit beat parser test
-    """
-    # ptparser = PTParser()
-    # logparser = LogParser()
-    #
-    # auditstashes = logparser.parse()
-    # ptstashes = ptparser.retrieve_raw()
-    #
-    # insn_manager = InsnManager(ptstashes)
-    # ptstashes = insn_manager.proc_start_filter("/usr/bin/wget")
-
     """
     Project test
     """
-    project = Project(exec="/home/chuqi/capstone/toy_pt/toy", audit_parser=None, pt_parser=None,
-                      isa_util=isa)
+    # project = Project(exec="/usr/bin/wget", audit_parser=None, pt_parser=None,
+    #                   isa_util=isa)
+    ## dirty way here...
+    with open("/Users/chuqiz/2021/capstone/LogEngine/database/wget.dump", "rb") as f:
+        log.info(f"Loading project from local file.")
+        project = pickle.load(f)
+
     # test syscall chain
-    project.construct_provenence_graph(project.proc_audit_stashes, save_name="toy")
+    project.construct_provenence_graph(project.proc_audit_stashes, save_name="wget")
 
     """
     angr embedding test
     """
     import angr
     p: angr.Project = project.create_angr_project()
-
+    project.angr_proj = p
     """
     CFGUtilities test
     """
-    cfg_util = CFGUtilities(p, p.factory.entry_state())
+    project._cfg_util = CFGUtilities(p, p.factory.entry_state())
     # cfg_util.plot_full("global_cfg")
+
+    """
+    ExecutionFlow test
+    """
+    ef = ExecutionFlow(project)
+
     """
     RDA test
     """
     # should generate cfg before RDA!!
     # recover calling convention
-    _ = p.analyses.CompleteCallingConventions(recover_variables=True)
+    #_ = p.analyses.CompleteCallingConventions(recover_variables=True)
+    _ = p.analyses.CompleteCallingConventions()
 
     from angr.analyses.reaching_definitions.function_handler import FunctionHandler
     from angr.analyses.reaching_definitions.rd_state import ReachingDefinitionsState
@@ -76,6 +77,7 @@ if __name__ == '__main__':
     ob_point3 = ('insn', ob_func3, OP_AFTER)
 
     main_function = p.kb.functions.function(name='main')
+    gethttp = p.kb.functions.function(name='gethttp')
 
     prda = p.analyses.ReachingDefinitions(subject=main_function,
                                           func_graph=main_function.graph,

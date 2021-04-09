@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Tuple, Union
 
 import angr
 import networkx as nx
-from angr.analyses import CFGEmulated
+from angr.analyses import CFGEmulated, CFGFast
 from angr.analyses.cfg import CFGNode
 from angr.analyses.cfg.indirect_jump_resolvers.jumptable import JumpTableResolver
 from angr.knowledge_plugins.functions import Function
@@ -21,7 +21,7 @@ class CFGUtilities:
     def __init__(
         self,
         proj: angr.Project,
-        # imports: Dict[int, str],        # TODO(): THIS IS NOT CYFI FORSEE!!!
+        # imports: Dict[int, str],        # TODO(): THIS IS NOT FORSEE!!!
         # exports: Dict[int, str],
         entry_state: angr.sim_state,
         auto_save=True,
@@ -29,20 +29,21 @@ class CFGUtilities:
         root_dir="LogEngine",
         file_dir="temp",
     ):
-        log.debug("Generating CFGUtilities, please wait for a few minutes...")
+        log.info("Generating CFGUtilities, please wait for a few minutes...")
         self.proj: angr.Project = proj
         self.state: angr.sim_state = entry_state
         self._root_dir = root_dir
         self._file_dir = file_dir
         self._cfgpath = None
         self._kbpath = None
-        self.cfg: angr.analyses.CFGEmulated = self.load() if load_local else proj.analyses.CFGEmulated(
-            starts=[entry_state.addr], context_sensitivity_level=2,
-            keep_state=True
+        # self.cfg: angr.analyses.CFGEmulated = self.load() if load_local else proj.analyses.CFGEmulated(
+        #     starts=[entry_state.addr], context_sensitivity_level=2,
+        #     keep_state=True
+        # )
+        self.cfg: angr.analyses.CFGFast = self.load() if load_local else proj.analyses.CFGFast(
+            normalize=True,
+            data_references=True
         )
-        # self.exports = ExportManager(exports, proj).addr_map
-        # self.imports = imports
-        # self.call_targets = self.resolve_called_targets()     # TODO(): THIS IS NOT CYFI FORSEE!!!
         log.debug("CFGUtilities generated!")
         if auto_save:
             self.save()

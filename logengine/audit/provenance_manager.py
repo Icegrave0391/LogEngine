@@ -187,7 +187,7 @@ class ProvenanceManager(ManagerBase):
             # generate node
             return
 
-        if sys_name == "open":
+        if sys_name == "open" or sys_name == "openat":
             """
             <process> open <fd>  assign fd map
             """
