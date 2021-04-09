@@ -1,6 +1,6 @@
 import json
 import sys
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Iterable
 from .retrievers import compiled_patterns, raw_retreiver
 from .insn_state import InsnState
 import re
@@ -15,20 +15,62 @@ pt_test_file = 'naive_test/pt_wget_withoutxed'
 class PTParser(object):
     def __init__(self,
                  lpath: str = pt_test_file,
-                 outpath: Optional[str] = './log_output/pt_res'
+                 outpath: Optional[str] = './log_output/pt_res',
+                 objects: Iterable[str]=None
                  ):
         self.type = type
         self.path_pttrace = lpath
         self.path_out = outpath
         self.events = list()
+        self._objects = objects    # TODO():
+        self._proc_start = False
         log.info(f'Initialized a intel_pt log parser.')
 
-    def retrieve_raw(self, filter_mode=True, custom_filters: Optional[List[re.Pattern]]=None, already_xed_decode=False) -> List[InsnState]:
+    @property
+    def proc_start(self):
+        """
+        a flag tails whether pt log has parsed to the process
+        """
+        return self._proc_start
+
+    @proc_start.setter
+    def proc_start(self, v):
+        self._proc_start = v
+
+    @property
+    def objects(self):
+        # TODO(): multi-process procs support
+        return self._objects
+
+    @objects.setter
+    def objects(self, objs: Iterable):
+        self._objects = objs
+
+    def already_in_objects(self, execf):
+        if self.proc_start:
+            return True
+        if execf in self.objects:
+            self.proc_start = True
+            return True
+        return False
+
+    def retrieve_raw(self,
+                     filter_mode=True,
+                     custom_filters: Optional[List[re.Pattern]]=None,
+                     already_xed_decode=False,
+                     proc_start_filter=True
+                     ) -> List[InsnState]:
         """
         pre-process the raw perf script outpout file
         """
         log.info(f'Starting to retrieve the raw intel_pt output file {self.path_pttrace}...')
+        if proc_start_filter:
+            log.info(f"Process filter mode on. Retrieving from the beginning of {self.objects}...")
         stashes = list()
+
+        # reset proc_start
+        self.proc_start = False
+
         with open(self.path_pttrace, 'r') as f:
             for line in f.readlines():
                 if filter_mode and self._raw_linefilter(line, custom_filters) is True:
@@ -52,7 +94,7 @@ class PTParser(object):
                 flag = re.findall(r'u:([a-zA-Z ]+)', comm_infoset)[0]
                 if flag:
                     flag = re.sub(r' [a-fA-F0-9]+]', '', flag).strip()
-                    comm_infoset = comm_infoset.replace(flag, '')
+                    comm_infoset = comm_infoset.replace(flag, '', 1)
 
                 comm_infoset = comm_infoset.strip().split()
                 if not len(comm_infoset) == raw_retreiver['fields_noflag_len']:
@@ -67,8 +109,15 @@ class PTParser(object):
                 sym, offset = raw_retreiver['symwoff'](symwoff)
                 execf = raw_retreiver['exec'](exec)
 
+                if (proc_start_filter and
+                    not self.already_in_objects(execf)
+                ):
+                    continue
+
                 state = InsnState(comm, tid, pid, cpuinfo, timestamp, insn_type, flag, ip, sym, offset, execf, insn)
                 stashes.append(state)
+
+
         return stashes
 
     def _raw_linefilter(self, line: str, custom_filters: Optional[List[re.Pattern]] = None) -> bool :
@@ -97,3 +146,9 @@ class PTParser(object):
 
         hex_list = list(map(to_hex, str_list))
         return bytes(hex_list)
+
+    def __getstate__(self):
+        return {k: v for k, v in self.__dict__.items()}
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
