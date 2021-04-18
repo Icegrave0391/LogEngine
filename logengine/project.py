@@ -3,6 +3,7 @@ from logengine.factory.block import Block
 from logengine.pt import PTParser, InsnState, InsnManager
 from logengine.audit import *
 from logengine.audit import BeatState, ProvenanceManager
+
 from capstone import CsInsn, CS_OP_IMM, CS_OP_REG, CS_OP_MEM
 from typing import Optional, List, Union
 
@@ -55,9 +56,12 @@ class Project:
         self.blockrailset = BlockRailSet(self)
         # construct control flow
         self._init_controlflow_blocks()
-
+        # cfg utilities
         self._cfg_util = None
+        # execution flow construction
+        self._execution_flow = None
 
+        print(self.ef) # dirty save
         if serialize:
             with open(self.pickle_path, "wb") as f:
                 pickle.dump(self, f)
@@ -102,6 +106,12 @@ class Project:
 
         return str(root_dir.joinpath(DB_DIR, file.stem + ".dump").absolute())
 
+    @property
+    def ef(self):
+        if self._execution_flow is None:
+            from logengine.analyses import ExecutionFlow
+            self._execution_flow = ExecutionFlow(self)
+        return self._execution_flow
 
     def _init_proc_ptstashes(self):
         """
@@ -379,12 +389,20 @@ class Project:
         return angr_proj
 
     def __getstate__(self):
-        s = {k: v for k, v in self.__dict__.items() if k not in ("_audit_manager", "_pt_manager", "isa_util")}
+        s = {k: v for k, v in self.__dict__.items() if k not in ("_audit_manager", "_pt_manager", "isa_util", "angr_proj")}
         return s
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        self._audit_manger = None
+        self._pt_manager = None
         self.isa_util = ISA(ArchInfo())
+        self.angr_proj = self.create_angr_project()
+
+        # update execution flow
+        if self._execution_flow is not None:
+            self._execution_flow.project = self
+            self._execution_flow.angr_project = self.angr_proj
 
 class BlockRailSet:
     """

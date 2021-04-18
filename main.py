@@ -7,7 +7,7 @@ from logengine import Project
 
 from logengine.cfg.cfg_utilities import CFGUtilities
 from logengine.analyses.execution_flow import ExecutionFlow
-from logengine.analyses.FunctionHandler.function_handler import NaiveHandler
+from logengine.analyses.FunctionHandler import NaiveHandler, WgetHandler
 from visualize import Visualize as V
 import logging
 import pickle
@@ -22,6 +22,7 @@ if __name__ == '__main__':
     log.setLevel(level)
     isa = ISA(ArchInfo())
     log.debug(f'start main')
+
     """
     Project test
     """
@@ -38,29 +39,35 @@ if __name__ == '__main__':
     """
     angr embedding test
     """
-    import angr
-    p: angr.Project = project.create_angr_project()
-    project.angr_proj = p
+    # import angr
+    # p: angr.Project = project.create_angr_project()
+    # project.angr_proj = p
+    #
     """
     CFGUtilities test
     """
+    p = project.angr_proj
     project._cfg_util = CFGUtilities(p, p.factory.entry_state())
     # cfg_util.plot_full("global_cfg")
+    #
+    # """
+    # ExecutionFlow test
+    # """
+    # ef = ExecutionFlow(project)
 
-    """
-    ExecutionFlow test
-    """
-    ef = ExecutionFlow(project)
+    #
+    # function's sub graph
+    #
 
+    http_loop = project.angr_proj.kb.functions.function(name="http_loop")
+    sub_graph = project.ef.sub_transition_graph_for_function(6540, 11589, http_loop)
     """
     RDA test
     """
     # should generate cfg before RDA!!
     # recover calling convention
-    #_ = p.analyses.CompleteCallingConventions(recover_variables=True)
+    #_ = p.analyses.CompleteCallingConventions(recover_variables=True)   # why can't recover_variables?
     _ = p.analyses.CompleteCallingConventions()
-
-    from angr.analyses.reaching_definitions.function_handler import FunctionHandler
     from angr.analyses.reaching_definitions.rd_state import ReachingDefinitionsState
     from angr.analyses.reaching_definitions import ReachingDefinitionsAnalysis
     from angr.procedures.definitions.glibc import _libc_decls
@@ -68,24 +75,22 @@ if __name__ == '__main__':
     from angr.knowledge_plugins.key_definitions.atoms import Atom
     from angr.knowledge_plugins.key_definitions.constants import OP_BEFORE, OP_AFTER
 
-    ob_func1 = p.kb.functions.function(name='userlevel_read_file')
-    ob_point1 = ('insn', ob_func1, OP_BEFORE)
-    ob_func2 = p.kb.functions.function(name='fgets')
-    ob_point2 = ('insn', ob_func2, OP_AFTER)
+    socket = p.kb.functions.function(name='socket')
+    ob_point1 = ('node', socket.addr, OP_AFTER)
 
-    ob_func3 = p.kb.functions.function(name='fputs')
-    ob_point3 = ('insn', ob_func3, OP_AFTER)
+    fflush = p.kb.functions.function(name='fflush')
+    ob_point2 = ('node', fflush.addr, OP_BEFORE)
 
     main_function = p.kb.functions.function(name='main')
     gethttp = p.kb.functions.function(name='gethttp')
 
-    prda = p.analyses.ReachingDefinitions(subject=main_function,
-                                          func_graph=main_function.graph,
-                                          cc=main_function.calling_convention,
-                                          function_handler=NaiveHandler(),
+    prda = p.analyses.ReachingDefinitions(subject=http_loop,
+                                          func_graph=sub_graph,
+                                          cc=http_loop.calling_convention,
+                                          function_handler=WgetHandler(),
                                           call_stack=[],
-                                          observation_points=[ob_point1, ob_point2, ob_point3],
-                                          maximum_local_call_depth=100,
+                                          observation_points=[ob_point1, ob_point2],
+                                          maximum_local_call_depth=1000,
                                           dep_graph=DepGraph())
 
     import IPython; IPython.embed()

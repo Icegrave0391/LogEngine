@@ -30,6 +30,8 @@ class Block:
         self.pid = pid
         self.insn_states: List[InsnState] = insn_states
         self._capstone = None
+        self._is_return = None
+        self._is_call = None
 
         if self._project is None and byte_string is None:
             raise ValueError("byte_string has to be specified if project is not provided.")
@@ -113,10 +115,23 @@ class Block:
 
     @property
     def is_return(self):
-        last_insn = self.capstone.insns[-1]
-        if last_insn.mnemonic == "ret":
-            return True
-        return False
+        if self._is_return is None:
+            last_insn = self.capstone.insns[-1]
+            if last_insn.mnemonic == "ret":
+                self._is_return = True
+            else:
+                self._is_return = False
+        return self._is_return
+
+    @property
+    def is_call(self):
+        if self._is_call is None:
+            last_insn = self.capstone.insns[-1]
+            if last_insn.mnemonic == "call":
+                self._is_call = True
+            else:
+                self._is_call = False
+        return self._is_call
 
     def syscall_to_analysis(self):
         """

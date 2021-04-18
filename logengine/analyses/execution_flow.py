@@ -28,6 +28,12 @@ class CallSite:
             return f"<>"
         return f"<CallSite for caller: {self.caller.name}, callsite_sequence_index: {self.callsite_sequence}>"
 
+    def __setstate__(self, state):
+       self.__dict__.update(state)
+
+    def __getstate__(self):
+        return {k: v for k, v in self.__dict__.items()}
+
 class EFGNode(object):
     """
     This class stands for each single node in execution flow grpah
@@ -69,9 +75,17 @@ class EFGNode(object):
     def __repr__(self):
         return f"<EFGNode addr: {hex(self.addr)}, function: {self.symbol}>"
 
+    def __getstate__(self):
+        return {k: v for k, v in self.__dict__.items()}
+
+    def __setstate__(self, state):
+       self.__dict__.update(state)
+
+
+
 class ExecutionFlow():
 
-    def __init__(self, project: logengine.Project, keep_call_stack=True):
+    def __init__(self, project: logengine.project.Project, keep_call_stack=True):
         self.project = project
         self.angr_project: angr.Project = project.angr_proj
         self.graph = DiGraph()
@@ -79,6 +93,11 @@ class ExecutionFlow():
         # a function call stack to record the call_chain
         self._func_stack: List[Union[CallSite, None]]= []
         self._keep_call_stack = keep_call_stack
+
+        # local execution sequences
+        self._execution_sequences: Dict[int, Tuple[int, str]] = {}   # dict[sequence_index: (block_addr, symbol)]
+
+        # data structures used for analyzing
         self.__current_block: Union[Block, None] = None
         self.__prev_node : Union[EFGNode, None] = None
         self.__prev_block: Union[Block, None] = None
@@ -88,6 +107,13 @@ class ExecutionFlow():
     @property
     def edges(self):
         return self.graph.edges
+
+    @property
+    def blockrailset(self) -> logengine.project.BlockRailSet:
+        """
+        plain execution flow
+        """
+        return self.project.blockrailset
 
     @property
     def nodes(self):
@@ -129,6 +155,49 @@ class ExecutionFlow():
 
         return None
 
+    def sub_transition_graph_for_function(self, from_idx: int, to_idx: int, function: Union[str, Function]) -> Iterable[int]:
+        """
+        Get the sub_transition graph for a function, in a specified execution flow scope
+        :param from_idx: start location sequence_index of the execution flow
+        :param to_idx:   end location sequence_index of the execution flow
+        :param function: a string represents the function symbol, or angr.knowledge.Function
+        :return: function's sub local transition graph for the certain scope
+        """
+
+        if isinstance(function, str):
+            symbol = function
+            function = self.angr_project.kb.functions.function(name=symbol)
+        elif isinstance(function, Function):
+            symbol = function.symbol.name
+        else:
+            raise ValueError(f"function should not be type {type(function)}.")
+        # get the blockaddrs in the scope which could represent the function
+        block_addrs = []
+        for i in range(from_idx, to_idx + 1):
+            block_addr, block_symbol = self.get_block_info_by_sequence_index(i)
+            if symbol == block_symbol:
+                block_addrs.append(block_addr)
+        # get the function's blocknodes from angr.kb
+        blocknodes = []
+        for addr in block_addrs:
+            blocknodes.append(function._local_blocks[addr])
+        return function.graph.subgraph(blocknodes)
+
+    def get_block_info_by_sequence_index(self, sequence_index: int, return_block=False):
+        """
+        Get the block info from local_execution_sequences.
+        :param sequence_index:
+        :return:
+        """
+        if sequence_index < 0 or sequence_index > len(self.blockrailset.rail):
+            raise IndexError(f"Sequence index out of range {len(self.blockrailset.rail)}.")
+        block_addr, symbol = self._execution_sequences[sequence_index]
+        if return_block:
+            block = self.blockrailset.get_block(block_addr)
+            return block, symbol
+        else:
+            return block_addr, symbol
+
     #
     #  private methods
     #
@@ -156,10 +225,12 @@ class ExecutionFlow():
     def _update_call_stack(self, cs):
         self._func_stack.append(cs)
 
-    def _pop_call_stack(self):
+    def _pop_call_stack(self, order):
         if not len(self._func_stack):
-            log.warning("Tried to pop the empty call_stack saved local. Failed.")
-        self._func_stack.pop()
+            log.warning(f"Tried to pop the empty call_stack saved local. Failed. Sequence: {order}")
+
+        else:
+            self._func_stack.pop()
 
     def _analyze(self):
         """
@@ -189,6 +260,10 @@ class ExecutionFlow():
                 # init the node
                 node = EFGNode(self.__current_block, symbol=_start_sym, func=_start)
                 self._add_node(node, sequence_order, direct_caller=None)
+
+                # update execution sequence
+                self._execution_sequences[sequence_order] = (block_addr, _start_sym)
+
                 # update prev_node
                 self.__prev_node = node
 
@@ -199,7 +274,7 @@ class ExecutionFlow():
 
                 u_node = self.__prev_node
                 v_node = EFGNode(self.__current_block, symbol=curr_sym, func=curr_func)
-
+                self._execution_sequences[sequence_order] = (block_addr, curr_sym)
                 # jump in the same function,
                 # or during the syscall_chain,
                 # or in plt to syscall
@@ -222,13 +297,20 @@ class ExecutionFlow():
                     (self.__prev_block.plt_info()[0] is True and not self.__current_block.is_syscall) or
                     self.__prev_block.is_return
                 ):
-                    self._pop_call_stack()
+                    self._pop_call_stack(sequence_order)
                     direct_caller = self._get_current_caller()
 
-                # call or jump to another functionh
-                else:
+                # call to another function: A -call-> B -call-> C;
+                #                                               ^ direct_caller is B
+                elif self.__prev_block.is_call:
                     cs = CallSite(function=u_node.function, node_sequence=sequence_order-1)
                     self._update_call_stack(cs)
+                    direct_caller = self._get_current_caller()
+
+                # jmp to another function: A -call-> B -jmp-> C; then (C -ret-> A)
+                #                                             ^ direct_caller is A
+                # since jmp instruction does not change the call stack
+                else:
                     direct_caller = self._get_current_caller()
 
                 self._add_node(v_node, sequence_order, direct_caller=direct_caller)
@@ -237,3 +319,15 @@ class ExecutionFlow():
                 self.__prev_node = v_node
             """ update the current node sequence order index"""
             sequence_order += 1
+
+    def __getstate__(self):
+        return {k: v for k, v in self.__dict__.items() if k not in ["angr_project", "project"]}
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
+        # could not recover project and angr_project right now
+        #
+        # if not hasattr(self.project, "angr_proj"):
+        #     setattr(self.project, "angr_proj", self.project.create_angr_project())
+        # self.angr_project = self.project.angr_proj

@@ -3,6 +3,8 @@ import logging
 from visualize import magic_graph_print as mgp
 log = logging.getLogger(__name__)
 
+from ..execution_flow import ExecutionFlow
+
 import angr
 
 from angr.calling_conventions import SimCC
@@ -45,7 +47,7 @@ class DefinitionUtil:
         create all the atoms represent the function's arguments, conducted by function's cc
         """
         # SimRegArg(SimFunctionArgument)
-        args = cc.args
+        args = cc.arg_locs()
         # RegisterAtom
         arg_atoms: List[Register] = []
         for arg in args:
@@ -98,9 +100,10 @@ class DefinitionUtil:
                     # handle a resolvable address
                     ## get the maximum size
                     max_sz = 1
-                    for mem_sz in mem_sz_data:
-                        if isinstance(mem_sz, int) and mem_sz > max_sz:
-                            max_sz = mem_sz
+                    if mem_sz_data is not None:
+                        for mem_sz in mem_sz_data:
+                            if isinstance(mem_sz, int) and mem_sz > max_sz:
+                                max_sz = mem_sz
 
                     tags = {ParameterTag(function=function.addr, metadata={'tagged_by': function.name,
                                                                         'mem_addr': mem_addr,
@@ -128,13 +131,17 @@ class NaiveHandler(FunctionHandler):
     """
     # g_local_live_definitions: Dict[int, LiveDefinitions] = {}
 
-    def __init__(self):
+    def __init__(self, ef: Optional[ExecutionFlow]=None):
         self._analyses = None
         # self._local_func_stack = []
         self.project: 'angr.Project' = None
         self.util: 'DefinitionUtil' = None
         self._handle_plt = False
         self._plt_addr = None
+        self._ef = None
+        if ef is not None:
+            self._ef = ef
+
 
     @property
     def handle_plt(self):
@@ -156,7 +163,6 @@ class NaiveHandler(FunctionHandler):
         ob_res: LiveDefinitions = child_rda.observed_results[("insn", self.plt_addr, OP_AFTER)]
         child_rda.observed_results[("insn", self.plt_addr, OP_AFTER)] = ob_res.merge(live_definitions)
 
-
     def hook(self, analysis):
         """
         Hook is just to pass the parent's RDA
@@ -167,6 +173,36 @@ class NaiveHandler(FunctionHandler):
         self.project = analysis.project
         self.util = DefinitionUtil(self.project)
         return self
+
+    def handle_dcgettext(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
+        """
+        char * dcgettext (const char * domainname, const char * msgid, int category);
+        """
+        dcgettext = self.project.kb.functions.function(name="dcgettext")
+        cc = dcgettext.calling_convention
+
+        arg_atoms: List[Register] = self.util.create_arg_atoms(cc)
+        # add use for arguments
+        for reg_atom in arg_atoms:
+            state.add_use(reg_atom, codeloc)
+
+        # add definition of ret
+        return True, state
+
+    def handle_strlen(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
+        """
+        size_t strlen(const char *s);
+        """
+
+        strlen = self.project.kb.functions.function(name="strlen")
+        cc = strlen.calling_convention
+
+        arg_atoms: List[Register] = self.util.create_arg_atoms(cc)
+        """1. add use"""
+        for reg_atom in arg_atoms:
+            state.add_use(reg_atom, codeloc)
+        """2. add ret"""
+        import IPython; IPython.embed()
 
     def handle_fopen(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
         # just pass that, don't change state for right now
@@ -266,8 +302,22 @@ class NaiveHandler(FunctionHandler):
         cc = read.calling_convention
 
         arg_atoms = self.util.create_arg_atoms(cc)
+        rdi_atom, rdi_data, rdi_current_defs = self.util.get_defs_by_register_atom(arg_atoms, 0, state, codeloc)
+        rsi_atom, rsi_data, rsi_current_defs = self.util.get_defs_by_register_atom(arg_atoms, 1, state, codeloc)
 
-        # for
+        # 0. delete exist memory definitions
+        for mem_addr in rdi_data:
+            if self.util.definition_data_represent_address(mem_addr):
+                exist_memdefs = state.memory_definitions.get_objects_by_offset(mem_addr)
+                for memdef in exist_memdefs:
+                    state.kill_definitions(memdef.atom, memdef.codeloc)
+
+        # 1. add use for the parameter registers
+        for reg_atom in arg_atoms:
+            state.add_use(reg_atom, codeloc)
+
+        # 2. create memory definitions
+        self.util.create_memory_definition(rdi_data, rsi_data, state, codeloc, read)
 
     def handle_fputs(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
         """

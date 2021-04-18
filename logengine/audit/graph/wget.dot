@@ -1,0 +1,105 @@
+strict digraph "" {
+	"fd: 3
+path: /etc/ld.so.cache" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"exec: /usr/bin/wget
+pid: 205800" -> "fd: 2
+path: stderr"	 [label=write];
+	"exec: /usr/bin/wget
+pid: 205800" -> "sockfd: 3
+addr: /var/run/nscd/socket
+port: None"	 [label=connect];
+	"exec: /usr/bin/wget
+pid: 205800" -> "sockfd: 3
+addr: 127.0.0.53
+port: 53"	 [label=connect];
+	"exec: /usr/bin/wget
+pid: 205800" -> "sockfd: 3
+addr: 100000000000000000000000
+port: None"	 [label=sendto];
+	"exec: /usr/bin/wget
+pid: 205800" -> "sockfd: 3
+addr: 45.113.192.102
+port: 0"	 [label=connect];
+	"exec: /usr/bin/wget
+pid: 205800" -> "sockfd: 3
+addr: 00000000000000000000000000000000
+port: None"	 [label=connect];
+	"exec: /usr/bin/wget
+pid: 205800" -> "sockfd: 3
+addr: 45.113.192.101
+port: 0"	 [label=connect];
+	"exec: /usr/bin/wget
+pid: 205800" -> "sockfd: 3
+addr: 45.113.192.102
+port: 80"	 [label=connect];
+	"exec: /usr/bin/wget
+pid: 205800" -> "fd: 3
+path: addr: 45.113.192.102, port: 80"	 [label=write];
+	"exec: /usr/bin/wget
+pid: 205800" -> "fd: 4
+path: index.html"	 [label=write];
+	"fd: 3
+path: /lib/x86_64-linux-gnu/libuuid.so.1" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"fd: 3
+path: None" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"fd: 3
+path: /lib/x86_64-linux-gnu/libssl.so.1.1" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"fd: 3
+path: /lib/x86_64-linux-gnu/libpsl.so.5" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"fd: 3
+path: /lib/x86_64-linux-gnu/libc.so.6" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"fd: 3
+path: /lib/x86_64-linux-gnu/libpthread.so.0" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"fd: 3
+path: /lib/x86_64-linux-gnu/libdl.so.2" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"fd: 3
+path: /usr/share/locale/locale.alias" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"fd: 3
+path: /etc/wgetrc" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"fd: 3
+path: /home/chuqi/.wget-hsts" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"fd: 3
+path: /etc/nsswitch.conf" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"fd: 3
+path: /etc/resolv.conf" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"fd: 3
+path: /lib/x86_64-linux-gnu/libnss_files.so.2" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"fd: 3
+path: /lib/x86_64-linux-gnu/libnss_mdns4_minimal.so.2" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"fd: 3
+path: /lib/x86_64-linux-gnu/libnss_dns.so.2" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"sockfd: 3
+addr: 127.0.0.53
+port: 53" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=recvfrom];
+	"fd: 3
+path: /etc/gai.conf" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+	"sockfd: 3
+addr: 100000000000000000000000
+port: None" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=recvmsg];
+	"sockfd: 3
+addr: 45.113.192.102
+port: 80" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=recvfrom];
+	"fd: 3
+path: addr: 45.113.192.102, port: 80" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+}
