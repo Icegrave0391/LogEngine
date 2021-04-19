@@ -19,8 +19,6 @@ log.setLevel(logging.DEBUG)
 ROOT_DIR = "LogEngine"
 DB_DIR   = "database"
 
-
-
 class Project:
     """
     The main class of logengine, stands for the whole workflow of the analyses.

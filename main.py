@@ -7,7 +7,7 @@ from logengine import Project
 
 from logengine.cfg.cfg_utilities import CFGUtilities
 from logengine.analyses.execution_flow import ExecutionFlow
-from logengine.analyses.FunctionHandler import NaiveHandler, WgetHandler
+from logengine.analyses.data_flow import NaiveHandler, WgetHandler
 from visualize import Visualize as V
 import logging
 import pickle

@@ -6,3 +6,4 @@ __pycache__
 log_output
 **/graphs
 **/naive_test
+**/database
