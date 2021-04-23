@@ -47,7 +47,7 @@ if __name__ == '__main__':
     CFGUtilities test
     """
     p = project.angr_proj
-    project._cfg_util = CFGUtilities(p, p.factory.entry_state())
+    project._cfg_util = CFGUtilities(p, p.factory.entry_state(), load_local=True)
     # cfg_util.plot_full("global_cfg")
     #
     # """
@@ -84,9 +84,20 @@ if __name__ == '__main__':
     main_function = p.kb.functions.function(name='main')
     gethttp = p.kb.functions.function(name='gethttp')
 
-    prda = p.analyses.ReachingDefinitions(subject=http_loop,
-                                          func_graph=sub_graph,
-                                          cc=http_loop.calling_convention,
+    """
+    test hack-graph
+    """
+    from angr.analyses.reaching_definitions.subject import Subject
+    from logengine.analyses.execution_visitor import ExecutionGraphVisitor
+    connect_to_ip = p.kb.functions.function(name="connect_to_ip") # direct caller of socket
+    subg, maps = project.ef.sub_execution_flow_graph(8109, 11589)
+
+    subject = Subject(connect_to_ip, subg, connect_to_ip.calling_convention)
+    subject._visitor = ExecutionGraphVisitor(subg, maps)
+
+    prda = p.analyses.ReachingDefinitions(subject=subject,
+                                          func_graph=subg,
+                                          cc=connect_to_ip.calling_convention,
                                           function_handler=WgetHandler(),
                                           call_stack=[],
                                           observation_points=[ob_point1, ob_point2],

@@ -3,26 +3,17 @@ import logging
 from visualize import magic_graph_print as mgp
 log = logging.getLogger(__name__)
 
+from .definition_util import DefinitionUtil
 from ..execution_flow import ExecutionFlow
 import angr
 
-from angr.calling_conventions import SimCC
 from angr.analyses.reaching_definitions import ReachingDefinitionsAnalysis
-from angr.analyses.reaching_definitions.heap_allocator import HeapAllocator
 from angr.analyses.reaching_definitions.function_handler import FunctionHandler
-from angr.knowledge_plugins.functions import Function
-from angr.knowledge_plugins.key_definitions.definition import Definition
-from angr.knowledge_plugins.key_definitions.unknown_size import UnknownSize, UNKNOWN_SIZE
-from angr.knowledge_plugins.key_definitions.tag import LocalVariableTag, ParameterTag, ReturnValueTag, Tag
-from angr.knowledge_plugins.key_definitions.atoms import Atom, Register, MemoryLocation, Parameter, Tmp
 from angr.knowledge_plugins.key_definitions.constants import OP_BEFORE, OP_AFTER
-from angr.knowledge_plugins.key_definitions.dataset import DataSet
 from angr.knowledge_plugins.key_definitions.heap_address import HeapAddress
-from angr.knowledge_plugins.key_definitions.undefined import Undefined, UNDEFINED
 from angr.engines.light import RegisterOffset, SpOffset
 from angr.knowledge_plugins.key_definitions import LiveDefinitions
 if TYPE_CHECKING:
-    from .definition_util import DefinitionUtil
     from angr.code_location import CodeLocation
     from angr.analyses.reaching_definitions.dep_graph import DepGraph
     from angr.analyses.reaching_definitions.rd_state import ReachingDefinitionsState
@@ -43,7 +34,7 @@ class WgetHandler(FunctionHandler):
         self._analyses = None
         # self._local_func_stack = []
         self.project: 'angr.Project' = None
-        self.util: 'DefinitionUtil' = None
+        self.util: DefinitionUtil = None
         self._handle_plt = False
         self._plt_addr = None
         self._ef = None
@@ -250,11 +241,7 @@ class WgetHandler(FunctionHandler):
         # get data
         rdi_atom, rdi_data, rdi_defs = self.util.get_defs_by_register_atom(arg_atoms, 0, state, codeloc)
         """2. add dependecy for memory definition"""
-        for mem_addr in rdi_data:
-            if self.definition_data_represent_address(mem_addr):
-                memdefs: Iterable[Definition] = state.memory_definitions.get_objects_by_offset(mem_addr)
-                for memdef in memdefs:
-                    state.add_use_by_def(memdef, codeloc)
+        self.util.create_memory_dependency(rdi_data, state, codeloc, strlen)
 
         """3. create return value definition"""
         self.util.create_ret_val_definition(strlen, state, codeloc)
@@ -419,12 +406,7 @@ class WgetHandler(FunctionHandler):
               clear relevant state.codeloc_use.
               thus it's necessary to delete exist definitions before adding those registers uses.
         """
-        for mem_addr in rdi_data:
-            if self.definition_data_represent_address(mem_addr):
-                exist_memdefs: Iterable[Definition] = state.memory_definitions.get_objects_by_offset(mem_addr)
-                for memdef in exist_memdefs:
-                    state.kill_definitions(memdef.atom, memdef.codeloc)
-
+        self.util.kill_memory_definitions(rdi_data, state, codeloc, fgets)
         """1. add use for current definitions, indicating that the parameters have passed on"""
         for reg_atom in arg_atoms:
             state.add_use(reg_atom, codeloc)
@@ -449,11 +431,7 @@ class WgetHandler(FunctionHandler):
         rsi_atom, rsi_data, rsi_current_defs = self.util.get_defs_by_register_atom(arg_atoms, 1, state, codeloc)
 
         # 0. delete exist memory definitions
-        for mem_addr in rdi_data:
-            if self.util.definition_data_represent_address(mem_addr):
-                exist_memdefs = state.memory_definitions.get_objects_by_offset(mem_addr)
-                for memdef in exist_memdefs:
-                    state.kill_definitions(memdef.atom, memdef.codeloc)
+        self.util.kill_memory_definitions(rdi_data, state, codeloc, read)
 
         # 1. add use for the parameter registers
         for reg_atom in arg_atoms:
@@ -461,16 +439,16 @@ class WgetHandler(FunctionHandler):
 
         # 2. create memory definitions
         self.util.create_memory_definition(rdi_data, rsi_data, state, codeloc, read)
+        # 3. return val
+        self.util.create_ret_val_definition(read, state, codeloc)
+        return True, state
 
     def handle_fputs(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
         """
-        fputs(char * buffer, FILE * stream) // rdi, rsi
+        int fputs(char * buffer, FILE * stream) // rdi, rsi
         """
         fputs = self.project.kb.functions.function(name='fputs')
         cc = fputs.calling_convention
-
-        # SimRegArg(SimFunctionArgument)
-        args = cc.args
         # RegisterAtom
         arg_atoms = self.util.create_arg_atoms(cc)
         """1. add use for current definitions, indicating that the parameters have passed on"""
@@ -481,15 +459,11 @@ class WgetHandler(FunctionHandler):
         """
         # 2.1 first get all the current live_definitions relative to rdi
         rdi_atom, rdi_data, rdi_current_defs = self.util.get_defs_by_register_atom(arg_atoms, 0, state, codeloc)
-
         # 2.2 add dependency
-        for mem_addr in rdi_data:
-            if self.definition_data_represent_address(mem_addr):
-                memdefs: Iterable[Definition] = state.memory_definitions.get_objects_by_offset(mem_addr)
-                for memdef in memdefs:
-                    state.add_use_by_def(memdef, codeloc)
-
-        import ipdb;ipdb.set_trace()
+        self.util.create_memory_dependency(rdi_data, state, codeloc, fputs)
+        """3. ret val"""
+        self.util.create_ret_val_definition(fputs, state, codeloc)
+        # import ipdb;ipdb.set_trace()
         return True, state
 
     def handle_write(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
@@ -506,14 +480,8 @@ class WgetHandler(FunctionHandler):
 
         """2. determine the use-value, to add dependency"""
         rsi_atom, rsi_data, rsi_current_defs = self.util.get_defs_by_register_atom(arg_atoms, 1, state, codeloc)
-
         # add dependency
-        for mem_addr in rsi_data:
-            if self.definition_data_represent_address(mem_addr):
-                memdefs: Iterable[Definition] = state.memory_definitions.get_objects_by_offset(mem_addr)
-                for memdef in memdefs:
-                    state.add_use_by_def(memdef, codeloc)
-
+        self.util.create_memory_dependency(rsi_data, state, codeloc, write)
         """ add return value """
         self.util.create_ret_val_definition(write, state, codeloc)
         return True, state
@@ -570,8 +538,24 @@ class WgetHandler(FunctionHandler):
         allocated_addr: HeapAddress
         allocated_addr, allocated_size = self.util.allocate(state, codeloc, rdi_data, function=malloc)
         """3. create ret value"""
-        dataset = DataSet()
-        self.util.create_ret_val_definition(malloc, state, codeloc, )
+        self.util.create_ret_val_definition(malloc, state, codeloc, data=allocated_addr)
+        return True, state
+
+    def handle_free(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
+        """
+        void free(void *ptr);
+        """
+        free = self.project.kb.functions.function(name="free")
+        arg_atoms = self.util.create_arg_atoms(free.calling_convention)
+
+        rdi_atom, rdi_data, _ = self.util.get_defs_by_register_atom(arg_atoms, 0, state, codeloc)
+        """1. add use of args"""
+        for reg_atom in arg_atoms:
+            state.add_use(reg_atom, codeloc)
+        """2. free"""
+        self.util.free(state, codeloc, rdi_data, free)
+        return True, state
+
 
     def handle_local_function(self, state: 'ReachingDefinitionsState', function_address: int, call_stack: List,
                               maximum_local_call_depth: int, visited_blocks: Set[int], dep_graph: 'DepGraph',
@@ -579,6 +563,9 @@ class WgetHandler(FunctionHandler):
                               codeloc: Optional['CodeLocation'] = None):
         """
         Essential part for creating the inter-procedural data flow analysis, to create RDA recursively.
+
+        This is a hook-ed local_function_handler, for the graph privided is actually a scope of execution-flow.
+        So we don't really handle the local_function, excluding plt_functions.
         """
         local_function = self.project.kb.functions.function(addr=function_address)
 
@@ -586,6 +573,10 @@ class WgetHandler(FunctionHandler):
         self.handle_plt = (local_function.is_plt, function_address)
 
         log.info(f"ReachingDefinitionAnalysis handling local function: {local_function.name}")
+
+        # JUST let the analysis go on since we already build the `execution flow graph`
+        if not local_function.is_plt:
+            return True, state, visited_blocks, dep_graph
 
         """1. get parent's rd-state & rda"""
         parent_rdstate = state

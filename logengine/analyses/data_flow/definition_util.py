@@ -162,12 +162,15 @@ class DefinitionUtil:
         # get the maximum size
         max_sz = 1
         if mem_sz_data is not None:
-            max_in_data = max(list(filter(lambda x: isinstance(x, int), mem_sz_data)))
+            sz_data = list(filter(lambda x: isinstance(x, int), mem_sz_data))
+            if len(sz_data):
+                max_in_data = max(sz_data)
+            else:
+                max_in_data = 1
             max_sz = 1 if max_in_data < 1 else max_in_data
 
         for mem_addr in mem_addr_data:
             if type(mem_addr) is Undefined or not self.definition_data_represent_address(mem_addr):
-                log.info('Memory address undefined, ins_addr = %#x.', codeloc.ins_addr)
                 log.info(f"[create_memory_definition] Has undefined memory address, function: {function.name if function else '?'}, codeloc: {codeloc}")
                 continue
             # handle a resolvable address
@@ -178,10 +181,10 @@ class DefinitionUtil:
                                                                     })}
             else:
                 tags = None
-            memloc = MemoryLocation(mem_addr, max_sz)
+            memloc_atom = MemoryLocation(mem_addr, max_sz)
             # add definitions
             dataset = DataSet(content_data, max_sz * 8)
-            state.kill_and_add_definition(memloc, codeloc, dataset, tags=tags)
+            state.kill_and_add_definition(memloc_atom, codeloc, dataset, tags=tags)
 
     def create_ret_atom(self, cc: SimCC) -> Register:
         """
@@ -235,6 +238,28 @@ class DefinitionUtil:
             tags = None
         state.kill_and_add_definition(memloc, codeloc, data=DataSet(UNDEFINED, memloc.size * 8), tags=tags)
         return heap_addr, memloc.size
+
+    def free(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation',
+             heap_addr_data: Set,
+             function: Optional[Function]=None):
+        """
+        Free (deallocate) the memory locations which were allocated(by malloc, calloc, etc.) at heap region.
+        :param heap_addr_data: a set of data represents the heap addresses
+        """
+        if not any(isinstance(heap_addr, HeapAddress) for heap_addr in heap_addr_data):
+            log.info(f"[free] Could not represent heap address, function: {function.name if function else '?'}, codeloc: {codeloc}")
+            return
+
+        heap_addrs = set(filter(lambda x: isinstance(x, HeapAddress), heap_addr_data))
+
+        for a in heap_addrs:
+            self.heap_allocator.free(a)
+        """1. add dependency of those memorys (mark use)"""
+        self.create_memory_dependency(heap_addrs, state, codeloc, function=function)
+        """2. kill those definitions"""
+        self.kill_memory_definitions(heap_addrs, state, codeloc, function=function)
+
+
 
     def _get_mem_def(self, state: 'ReachingDefinitionsState', mem_addr) -> Set[Definition]:
         """

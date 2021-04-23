@@ -107,7 +107,7 @@ class CFGUtilities:
             print(f"CFG kb saved at {self.kb_path}")
             log.debug(f"CFG kb saved at {self.kb_path}")
 
-    def load(self) -> CFGEmulated:
+    def load(self) -> CFGFast:
         """
         Load cfg `model` and `kb` from local files.
         """
@@ -131,6 +131,7 @@ class CFGUtilities:
             log.error(f"Path {self.kb_path} not exists, knowledge_base loaded failed")
             return cfg
         cfg.kb = kb
+        self.proj.kb = kb
         log.info("Recovered CFG model and knowledge_base from local successfully!")
         log.warning("Warn! Only `model` and `kb` have been recovered.")
         return cfg
