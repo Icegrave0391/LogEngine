@@ -40,10 +40,10 @@ class Visualize:
     def __init__(
         self,
         proj: angr.project,
-        exports: Dict[str, Any]
+        exports: Dict[str, Any]=None
     ):
         self.proj: angr.Project = proj
-        self.exports = exports
+        self.exports = exports if exports else {}
         self._root_dir = "LogEngine"
         self._file_dir = "graphs"
 

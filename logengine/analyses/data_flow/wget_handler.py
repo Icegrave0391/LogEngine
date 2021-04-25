@@ -229,7 +229,6 @@ class WgetHandler(FunctionHandler):
         size_t strlen(const char *s);
         #TODO(): calc strlen from strings
         """
-
         strlen = self.project.kb.functions.function(name="strlen")
         cc = strlen.calling_convention
 
@@ -464,6 +463,22 @@ class WgetHandler(FunctionHandler):
         """3. ret val"""
         self.util.create_ret_val_definition(fputs, state, codeloc)
         # import ipdb;ipdb.set_trace()
+        return True, state
+
+    def handle_fwrite(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
+        """
+        size_t fwrite(const void *restrict ptr, size_t size, size_t nitems, FILE *restrict stream);
+        """
+        fwrite = self.project.kb.functions.function(name="fwrite")
+        arg_atoms = self.util.create_arg_atoms(fwrite.calling_convention)
+        """1. add use for args"""
+        for reg_atom in arg_atoms:
+            state.add_use(reg_atom, codeloc)
+        """2. add memory dependency"""
+        rdi_atom, rdi_data, _ = self.util.get_defs_by_register_atom(arg_atoms, 0, state, codeloc)
+        self.util.create_memory_dependency(rdi_data, state, codeloc, fwrite)
+        """3. ret """
+        self.util.create_ret_val_definition(fwrite, state, codeloc)
         return True, state
 
     def handle_write(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):

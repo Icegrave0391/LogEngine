@@ -186,6 +186,39 @@ class DefinitionUtil:
             dataset = DataSet(content_data, max_sz * 8)
             state.kill_and_add_definition(memloc_atom, codeloc, dataset, tags=tags)
 
+    def _manipulate_return_SP(self, state, codeloc, function: Optional[Function]):
+
+        if self.project.arch.call_pushes_ret:
+            # pop return address if necessary
+            defs_sp = state.register_definitions.get_objects_by_offset(self.project.arch.sp_offset)
+            if len(defs_sp) == 0:
+                raise ValueError('No definition for SP found')
+            if len(defs_sp) == 1:
+                sp_data = next(iter(defs_sp)).data.data
+            else:  # len(defs_sp) > 1
+                sp_data = set()
+                for d in defs_sp:
+                    sp_data.update(d.data)
+
+            if len(sp_data) != 1:
+                log.critical(f'Invalid number of values for stack pointer at function {function.name} return. Stack is probably unbalanced. This indicates '
+                           'serious problems with function handlers. Stack pointer values include: %s.', sp_data)
+
+            sp_addr = next(iter(sp_data))
+            if isinstance(sp_addr, (int, SpOffset)):
+                sp_addr -= self.project.arch.stack_change
+            elif isinstance(sp_addr, Undefined):
+                pass
+            else:
+                raise TypeError('Invalid type %s for stack pointer.' % type(sp_addr).__name__)
+
+            atom = Register(self.project.arch.sp_offset, self.project.arch.bytes)
+            tag = ReturnValueTag(
+                function=function.addr if function else "?",
+                metadata={'tagged_by': function.name if function else "?"}
+            )
+            state.kill_and_add_definition(atom, codeloc, DataSet(sp_addr, self.project.arch.bits), tags={tag})
+
     def create_ret_atom(self, cc: SimCC) -> Register:
         """
         Create a return register atom, conducted by the function's cc
@@ -194,6 +227,9 @@ class DefinitionUtil:
         return Atom.from_argument(ret_reg, self.project.arch.registers)
 
     def create_ret_val_definition(self, function: Function, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation', data=UNDEFINED):
+
+        self._manipulate_return_SP(state, codeloc, function)
+
         ret_reg = self.create_ret_atom(function.calling_convention)
         tags = {ReturnValueTag(function.addr, metadata={"tagged_by": function.name})}
         dataset = DataSet(data, ret_reg.size * 8)

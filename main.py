@@ -33,8 +33,10 @@ if __name__ == '__main__':
         log.info(f"Loading project from local file.")
         project = pickle.load(f)
 
-    # test syscall chain
-    project.construct_provenence_graph(project.proc_audit_stashes, save_name="wget")
+    """
+    provenance graph test
+    """
+    # project.construct_provenence_graph(project.proc_audit_stashes, save_name="wget")
 
     """
     angr embedding test
@@ -56,11 +58,10 @@ if __name__ == '__main__':
     # ef = ExecutionFlow(project)
 
     #
-    # function's sub graph
+    # function's sub graph test
     #
-
     http_loop = project.angr_proj.kb.functions.function(name="http_loop")
-    sub_graph = project.ef.sub_transition_graph_for_function(6540, 11589, http_loop)
+    # sub_graph = project.ef.sub_transition_graph_for_function(6540, 11589, http_loop)
     """
     RDA test
     """
@@ -89,15 +90,19 @@ if __name__ == '__main__':
     """
     from angr.analyses.reaching_definitions.subject import Subject
     from logengine.analyses.execution_visitor import ExecutionGraphVisitor
-    connect_to_ip = p.kb.functions.function(name="connect_to_ip") # direct caller of socket
-    subg, maps = project.ef.sub_execution_flow_graph(8109, 11589)
+    # connect_to_ip = p.kb.functions.function(name="connect_to_ip") # direct caller of socket
+    # subg, maps = project.ef.sub_execution_flow_graph(8109, 11589)
+    #
+    # subject = Subject(connect_to_ip, subg, connect_to_ip.calling_convention)
+    # subject._visitor = ExecutionGraphVisitor(subg, maps)
+    func = p.kb.functions.function(name="read_response_body")
+    subg, maps = project.ef.sub_execution_flow_graph(10596, 11577)
 
-    subject = Subject(connect_to_ip, subg, connect_to_ip.calling_convention)
+    subject = Subject(func, subg, func.calling_convention)
     subject._visitor = ExecutionGraphVisitor(subg, maps)
-
     prda = p.analyses.ReachingDefinitions(subject=subject,
                                           func_graph=subg,
-                                          cc=connect_to_ip.calling_convention,
+                                          cc=func.calling_convention,
                                           function_handler=WgetHandler(),
                                           call_stack=[],
                                           observation_points=[ob_point1, ob_point2],
