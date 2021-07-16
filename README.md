@@ -19,13 +19,13 @@
 
 **LogEngine**现阶段仍然作为简易demo，通过分析系统采集得到的audit log以及pt trace，进行攻击的溯源与取证分析。该工具的设计过程采用自顶向下模块化的思想，将整个项目分为不同的模块：
 
--- Project     
- |_ audit     
- |_ pt     
- |_ factory     
- |_ analyses     
-    |_ execution_flow     
-    |_ data_flow     
+--> Project     
+--> |_ audit     
+--> |_ pt     
+--> |_ factory     
+--> |_ analyses     
+-->  -->|_ execution_flow     
+-->  -->|_ data_flow     
 
 * Project：借鉴angr中的命名格式（阅读源码时注意区分`angr.Project`与`LogEngine.Project`，该项目与angr的Project模块采用相同的命名，并调用angr模块，确实容易混淆），作为分析的主控部分，与各个模块和功能进行交互。
 
