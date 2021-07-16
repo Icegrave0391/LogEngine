@@ -19,13 +19,13 @@
 
 **LogEngine**现阶段仍然作为简易demo，通过分析系统采集得到的audit log以及pt trace，进行攻击的溯源与取证分析。该工具的设计过程采用自顶向下模块化的思想，将整个项目分为不同的模块：
 
--- Project
- |_ audit
- |_ pt
- |_ factory
- |_ analyses
-    |_ execution_flow
-    |_ data_flow
+-- Project     
+ |_ audit     
+ |_ pt     
+ |_ factory     
+ |_ analyses     
+    |_ execution_flow     
+    |_ data_flow     
 
 * Project：借鉴angr中的命名格式（阅读源码时注意区分`angr.Project`与`LogEngine.Project`，该项目与angr的Project模块采用相同的命名，并调用angr模块，确实容易混淆），作为分析的主控部分，与各个模块和功能进行交互。
 
@@ -36,9 +36,16 @@
   * execution_flow：分析pt_trace得到的控制流，生成图模型。
   * data_flow：完整的过程间静态数据流分析系统（使用**ReachingDefinitionAnalysis**）。
 
-## 关于ReachingDefinitionAnalysis
+## 关于ReachingDefinitionAnalysis（RDA）
 
-项目基于angr中的[ReachingDefinitions]()
+项目基于angr中的[ReachingDefinitions]()。
+对于ReachingDefinitions，Degrigis有一篇博客描述其功能：[A reaching definition engine for binary analysis built-in in angr.](https://degrigis.github.io/posts/angr_rd/)。该博客详细地介绍了ReachingDefinitions模块的工作流程以及使用说明，能够帮助上手。然而，遗憾的是，ReachingDefinitions是一个Intra-procedural Data Flow Analysis的模版，并不支持过程间的分析。
+
+Pamplemousse作为该模块的开发者，正在进行过程间数据流分析的研究，并提供了拓展该RDA，实现过程间分析的简略教程，见其博客[Handle function calls during static analysis in angr](https://blog.xaviermaso.com/2021/02/25/Handle-function-calls-during-static-analysis-with-angr.html)。
+由于该项目正在进行科研，作者并没有将该完整项目进行开源，因此需要自行实现，个人实现过程中的所有问题可以参考issue: [bits_of_static_binary_analysis](https://github.com/Pamplemousse/bits_of_static_binary_analysis/issues/1)。
+
+**🌟强烈建议阅读angr实现ReachingDefinitions的完整源码。然而这个过程是非常痛苦的。**
+
 
 
 
