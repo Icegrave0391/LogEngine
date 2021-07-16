@@ -34,7 +34,7 @@
 * factory：负责描述通过pt trace解析得到的binary信息（如*basic block*），并提供相关的底层接口。（**注：该模块和angr.factory.block高度重合，也容易引起混淆。这样设计的目的是能够拓展angr.block中的相关功能（如添加syscall、plt信息等）**）
 * analyses：进行控制流的重建以及数据流分析。
   * execution_flow：分析pt_trace得到的控制流，生成图模型。
-  * data_flow：完整的过程间静态数据流分析系统（使用**ReachingDefinitionAnalysis**）。
+  * data_flow：完整的过程间静态数据流分析系统（拓展自angr中的**ReachingDefinitionAnalysis**）。
 
 ## 关于ReachingDefinitionAnalysis（RDA）
 
