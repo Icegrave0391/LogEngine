@@ -1,0 +1,22 @@
+strict digraph "" {
+	"exec: /usr/bin/wget
+pid: 205800" -> "sockfd: 3
+addr: 45.113.192.102
+port: 80"	 [label=connect];
+	"exec: /usr/bin/wget
+pid: 205800" -> "fd: 2
+path: stderr"	 [label=write];
+	"exec: /usr/bin/wget
+pid: 205800" -> "fd: 3
+path: addr: 45.113.192.102, port: 80"	 [label=write];
+	"exec: /usr/bin/wget
+pid: 205800" -> "fd: 4
+path: index.html"	 [label=write];
+	"sockfd: 3
+addr: 45.113.192.102
+port: 80" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=recvfrom];
+	"fd: 3
+path: addr: 45.113.192.102, port: 80" -> "exec: /usr/bin/wget
+pid: 205800"	 [label=read];
+}

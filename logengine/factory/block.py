@@ -49,6 +49,10 @@ class Block:
         else:
             self._bytes = byte_string
 
+    def __hash__(self):
+        return hash((type(self), self.addr, self._bytes))
+
+
     def __getstate__(self):
         return {k:v for k, v in self.__dict__.items() if k not in ("_capstone", "_project", "isa_util")}
 
@@ -59,9 +63,6 @@ class Block:
 
     def __repr__(self):
         return '<Block for pid: %s, addr %#x, %d bytes>' % (self.exec, self.addr, self.size)
-
-    def __hash__(self):
-        return hash((type(self), self.addr, self.bytes))
 
     def __eq__(self, other):
         if type(self) is not type(other):

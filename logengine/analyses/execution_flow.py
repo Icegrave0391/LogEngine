@@ -6,7 +6,7 @@ import logengine
 from logengine.factory.block import Block
 from logengine.cfg.cfg_utilities import CFGUtilities
 
-from typing import List, Optional, Tuple, Union, Iterable, Dict
+from typing import List, Optional, Tuple, Union, Iterable, Dict, TYPE_CHECKING
 from deprecated.sphinx import deprecated
 from networkx import DiGraph
 from collections import OrderedDict
@@ -39,18 +39,20 @@ class CallSite:
     def __getstate__(self):
         return {k: v for k, v in self.__dict__.items()}
 
-class EFGNode(object):
+class EFGNode(BlockNode):
     """
-    This class stands for each single node in execution flow grpah
+    This class stands for each single node in execution flow grpah, note that EFGNode is derived from angr.BlockNode,
+    for integrating the EFReachingDefinitions (ReachingDefinitionAnalysis).
     """
+    __slots__ = ["block", "_call_stack_dict", "function", "_symbol", "_is_plt"]
 
-    def __init__(self, block: Block, symbol=None, is_plt=False, func:Optional[Function]=None):
+    def __init__(self, block: logengine.factory.Block, symbol=None, func:Optional[Function]=None, is_plt=None):
+        super(EFGNode, self).__init__(block.addr, block.size)
         self.block = block
-        self._name = None
-        self._is_plt = is_plt
         self._call_stack_dict = None
         self.function = func
         self._symbol = symbol
+        self._is_plt = is_plt
 
     @property
     def symbol(self):
@@ -60,13 +62,12 @@ class EFGNode(object):
 
     @property
     def is_plt(self):
-        if self.function is not None:
-            return self.function.is_plt
-        return self.block.plt_info()[0]
-
-    @property
-    def addr(self):
-        return self.block.addr
+        if self._is_plt is None:
+            if self.function is not None:
+                self._is_plt = self.function.is_plt
+            else:
+                self._is_plt = self.block.plt_info()[0]
+        return self._is_plt
 
     @property
     def is_syscall(self):
@@ -87,11 +88,10 @@ class EFGNode(object):
         return f"<EFGNode addr: {hex(self.addr)}, function: {self.symbol}>"
 
     def __getstate__(self):
-        return {k: v for k, v in self.__dict__.items()}
+        return (self.block, self._symbol, self.function, self._is_plt)
 
     def __setstate__(self, state):
-       self.__dict__.update(state)
-
+        self.__init__(*state)
 
 class ExecutionFlow():
     """
@@ -186,7 +186,6 @@ class ExecutionFlow():
                                  record_sequence_map=True):
         """
         Get the subgraph for the execution flow, which represents a certain scope of the whole execution flow.
-        The node in subgraph is type :angr.BlockNode, for integrating to ReachingDefinitionAnalysis(data-flow analysis).
 
         This method will also generate a sequence_to_node map, as a sorted sequence of nodes.
 
@@ -198,7 +197,7 @@ class ExecutionFlow():
                                     take that space cost to save time in sorting later on.
 
         :returns sub_graph, sequence_node_map
-            :sub_graph: the sub execution flow graph, which nodes are angr.BlockNode
+            :sub_graph: the sub execution flow graph
             :sequence_node_map: a map from the execution flow(sub execution flow) sequence indices, starts from 0,
                                and the nodes
         """
@@ -213,10 +212,11 @@ class ExecutionFlow():
         _prev_out_node = None
 
         def _blocknode(n: EFGNode):
-            if n.function is None:
-                log.warning(f"No function saved at node {n}, symbol: {n.symbol}")
-                return BlockNode(n.addr, n.block.size, graph=None, thumb=False)
-            return n.function._local_blocks[n.addr]
+            # if n.function is None:
+            #     log.warning(f"No function saved at node {n}, symbol: {n.symbol}")
+            #     return BlockNode(n.addr, n.block.size, graph=None, thumb=False)
+            # return n.function._local_blocks[n.addr]
+            return n
 
         def _sub_add_node(sub_graph: DiGraph, node, sequence: int, record_sequence_map=record_sequence_map):
             if node in sub_graph.nodes:
@@ -350,7 +350,7 @@ class ExecutionFlow():
         log.info(f"Start to construct execution flow graph.")
         if self.project._cfg_util is None:
             log.info(f"Initializing with angr's CFG...")
-            self.project._cfg_util = CFGUtilities(self.angr_project, self.angr_project.factory.entry_state())
+            self.project._cfg_util = CFGUtilities(self.angr_project, self.angr_project.factory.entry_state(), auto_save=False, load_local=True)
 
         block_rail_set = self.project.blockrailset
         self.graph.clear()

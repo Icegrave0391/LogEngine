@@ -1,6 +1,8 @@
 from typing import List, Set, Optional, TYPE_CHECKING, Union, Iterable, Dict, Tuple
 import logging
 from visualize import magic_graph_print as mgp
+from visualize import Visualize as V
+from functools import reduce
 log = logging.getLogger(__name__)
 
 from .definition_util import DefinitionUtil
@@ -13,6 +15,8 @@ from angr.knowledge_plugins.key_definitions.constants import OP_BEFORE, OP_AFTER
 from angr.knowledge_plugins.key_definitions.heap_address import HeapAddress
 from angr.engines.light import RegisterOffset, SpOffset
 from angr.knowledge_plugins.key_definitions import LiveDefinitions
+from angr.knowledge_plugins.key_definitions.definition import Definition
+import networkx
 if TYPE_CHECKING:
     from angr.code_location import CodeLocation
     from angr.analyses.reaching_definitions.dep_graph import DepGraph
@@ -38,6 +42,7 @@ class WgetHandler(FunctionHandler):
         self._handle_plt = False
         self._plt_addr = None
         self._ef = None
+        self._to_toppest = True
         if ef is not None:
             self._ef = ef
 
@@ -136,15 +141,15 @@ class WgetHandler(FunctionHandler):
         self.util.create_ret_val_definition(dcgettext, state, codeloc)
         return True, state
 
-    def handle___fdelt_chk(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
-        """
-        long int __fdelt_chk (long int d);
-        """
-        __fdelt_chk = self.project.kb.functions.function(name="__fdelt_chk")
-        arg_atoms = self.util.create_arg_atoms(__fdelt_chk.calling_convention)
-
-        # no prototype in calling convention?
-        return True, state
+    # def handle___fdelt_chk(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
+    #     """
+    #     long int __fdelt_chk (long int d);
+    #     """
+    #     __fdelt_chk = self.project.kb.functions.function(name="__fdelt_chk")
+    #     arg_atoms = self.util.create_arg_atoms(__fdelt_chk.calling_convention)
+    #
+    #     # no prototype in calling convention?
+    #     return True, state
 
     def handle__xstat64(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
         """
@@ -224,6 +229,20 @@ class WgetHandler(FunctionHandler):
         self.util.create_ret_val_definition(wcwidth, state, codeloc)
         return True, state
 
+    def handle_mbtowc(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
+        """
+        int mbtowc_l(wchar_t *restrict pwc, const char *restrict s, size_t n, locale_t loc);
+        """
+        func = self.project.kb.functions.function(name="mbtowc")
+
+        arg_atoms: List[Register] = self.util.create_arg_atoms(func.calling_convention)
+        """1. add use for the parameters"""
+        for reg_atom in arg_atoms:
+            state.add_use(reg_atom, codeloc)
+        """2. create return value definition"""
+        self.util.create_ret_val_definition(func, state, codeloc)
+        return True, state
+
     def handle_strlen(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
         """
         size_t strlen(const char *s);
@@ -257,7 +276,7 @@ class WgetHandler(FunctionHandler):
         rsi_atom, rsi_data, rsi_defs = self.util.get_defs_by_register_atom(arg_atoms, 1, state, codeloc)
 
         """1. kill origin definition """
-        self.util.kill_memory_definitions(rsi_data, state, codeloc, strtol)
+        # self.util.kill_memory_definitions(rsi_data, state, codeloc, strtol)
         """2. add use of args"""
         for reg_atom in arg_atoms:
             state.add_use(reg_atom, codeloc)
@@ -281,7 +300,7 @@ class WgetHandler(FunctionHandler):
         rdx_atom, rdx_data, _ = self.util.get_defs_by_register_atom(arg_atoms, 2, state, codeloc) # dst
         rcx_atom, rcx_data, _ = self.util.get_defs_by_register_atom(arg_atoms, 3, state, codeloc) # size
         """1. kill dst memory region definitions"""
-        self.util.kill_memory_definitions(rdx_data, state, codeloc, inet_ntop)
+        # self.util.kill_memory_definitions(rdx_data, state, codeloc, inet_ntop)
         """2. add use of args"""
         for reg_atom in arg_atoms:
             state.add_use(reg_atom, codeloc)
@@ -306,22 +325,22 @@ class WgetHandler(FunctionHandler):
         self.util.create_ret_val_definition(fileno, state, codeloc)
         return True, state
 
-    def handle_fopen(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
-        # just pass that, don't change state for right now
-        print(f"[handle fopen] codeloc: {codeloc}")
-        return True, state
-
-    def handle_fclose(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
-        print(f"[handle fclose] codeloc: {codeloc}")
-        return True, state
-
-    def handle_printf(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
-        print(f"[handle printf] codeloc: {codeloc}")
-        return True, state
-
-    def handle_puts(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
-        print(f"[handle puts] codeloc: {codeloc}")
-        return True, state
+    # def handle_fopen(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
+    #     # just pass that, don't change state for right now
+    #     print(f"[handle fopen] codeloc: {codeloc}")
+    #     return True, state
+    #
+    # def handle_fclose(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
+    #     print(f"[handle fclose] codeloc: {codeloc}")
+    #     return True, state
+    #
+    # def handle_printf(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
+    #     print(f"[handle printf] codeloc: {codeloc}")
+    #     return True, state
+    #
+    # def handle_puts(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
+    #     print(f"[handle puts] codeloc: {codeloc}")
+    #     return True, state
 
     def handle_memset(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
         """
@@ -334,7 +353,7 @@ class WgetHandler(FunctionHandler):
         rsi_atom, rsi_data, rsi_defs = self.util.get_defs_by_register_atom(arg_atoms, 1, state, codeloc)
         rdx_atom, rdx_data, rdx_defs = self.util.get_defs_by_register_atom(arg_atoms, 2, state, codeloc)
         """1. kill origin defs for memloc"""
-        self.util.kill_memory_definitions(rdi_data, state, codeloc, memset)
+        # self.util.kill_memory_definitions(rdi_data, state, codeloc, memset)
         """2. add use of args"""
         for reg_atom in arg_atoms:
             state.add_use(reg_atom, codeloc)
@@ -405,7 +424,7 @@ class WgetHandler(FunctionHandler):
               clear relevant state.codeloc_use.
               thus it's necessary to delete exist definitions before adding those registers uses.
         """
-        self.util.kill_memory_definitions(rdi_data, state, codeloc, fgets)
+        # self.util.kill_memory_definitions(rdi_data, state, codeloc, fgets)
         """1. add use for current definitions, indicating that the parameters have passed on"""
         for reg_atom in arg_atoms:
             state.add_use(reg_atom, codeloc)
@@ -416,6 +435,8 @@ class WgetHandler(FunctionHandler):
         """
         # create all the certain memory locs
         self.util.create_memory_definition(rdi_data, rsi_data, state, codeloc, fgets)
+        """3. ret"""
+        self.util.create_ret_val_definition(fgets, state, codeloc, data=rdi_data)
         return True, state
 
     def handle_read(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
@@ -428,16 +449,16 @@ class WgetHandler(FunctionHandler):
         arg_atoms = self.util.create_arg_atoms(cc)
         rdi_atom, rdi_data, rdi_current_defs = self.util.get_defs_by_register_atom(arg_atoms, 0, state, codeloc)
         rsi_atom, rsi_data, rsi_current_defs = self.util.get_defs_by_register_atom(arg_atoms, 1, state, codeloc)
-
+        rdx_atom, rdx_data, _                = self.util.get_defs_by_register_atom(arg_atoms, 2, state, codeloc)
         # 0. delete exist memory definitions
-        self.util.kill_memory_definitions(rdi_data, state, codeloc, read)
+        # self.util.kill_memory_definitions(rdi_data, state, codeloc, read)
 
         # 1. add use for the parameter registers
         for reg_atom in arg_atoms:
             state.add_use(reg_atom, codeloc)
 
         # 2. create memory definitions
-        self.util.create_memory_definition(rdi_data, rsi_data, state, codeloc, read)
+        self.util.create_memory_definition(rsi_data, rdx_data, state, codeloc, read)
         # 3. return val
         self.util.create_ret_val_definition(read, state, codeloc)
         return True, state
@@ -515,7 +536,7 @@ class WgetHandler(FunctionHandler):
             state.add_use(reg_atom, codeloc)
 
         """2. create definition of return register"""
-        self.util.create_ret_val_definition(socket, state, codeloc)
+        self.util.create_ret_val_definition(socket, state, codeloc, data=3)
 
         return True, state
 
@@ -533,6 +554,21 @@ class WgetHandler(FunctionHandler):
 
         """2. ret"""
         self.util.create_ret_val_definition(connect, state, codeloc)
+        return True, state
+
+    def handle_select(self, state: 'ReachingDefinitionsState', codeloc: 'CodeLocation'):
+        """
+        int select(int nfds, fd_set *restrict readfds, fd_set *restrict writefds, fd_set *restrict errorfds, struct timeval *restrict timeout);
+        """
+        select = self.project.kb.functions.function(name="select")
+        arg_atoms = self.util.create_arg_atoms(select.calling_convention)
+
+        """1. add use"""
+        for reg_atom in arg_atoms:
+            state.add_use(reg_atom, codeloc)
+
+        """2. add ret"""
+        self.util.create_ret_val_definition(select, state, codeloc)
         return True, state
 
     #
@@ -569,6 +605,8 @@ class WgetHandler(FunctionHandler):
             state.add_use(reg_atom, codeloc)
         """2. free"""
         self.util.free(state, codeloc, rdi_data, free)
+
+        self.util.create_ret_val_definition(free, state, codeloc)
         return True, state
 
 
@@ -583,14 +621,26 @@ class WgetHandler(FunctionHandler):
         So we don't really handle the local_function, excluding plt_functions.
         """
         local_function = self.project.kb.functions.function(addr=function_address)
-
         # determine whether to handle a plt function
         self.handle_plt = (local_function.is_plt, function_address)
 
         log.info(f"ReachingDefinitionAnalysis handling local function: {local_function.name}")
 
+        """debug"""
+        defs_sp = state.register_definitions.get_objects_by_offset(self.project.arch.sp_offset)
+        assert len(defs_sp) == 1
+        sp_data = next(iter(defs_sp)).data.data
+        assert len(sp_data) == 1
+        sp_addr = next(iter(sp_data))
+        if isinstance(sp_addr, (int, SpOffset)):
+            log.critical(f"[STACK DBG] call {local_function.name}, stack: {sp_addr}")
+        else:
+            raise ValueError(f"stack point SP seems to be undefined, please check what happened!")
+        """debug"""
         # JUST let the analysis go on since we already build the `execution flow graph`
         if not local_function.is_plt:
+            self._analyses: ReachingDefinitionsAnalysis
+            self._analyses._call_stack += [local_function.addr]
             return True, state, visited_blocks, dep_graph
 
         """1. get parent's rd-state & rda"""
@@ -609,14 +659,14 @@ class WgetHandler(FunctionHandler):
               *:RESOLVED:*: use `node` level observe for OP_AFTER
         """
         # get all the endpoints of the function and these types
-        ob_before, ob_after = [], []
+        ob_before, ob_after = set(), set()
 
         end_points = local_function.endpoints_with_type
         ret_points, trans_points, call_points = end_points["return"], end_points["transition"], end_points["call"]
 
         for ret_node in ret_points:
             b = local_function.get_block(ret_node.addr)
-            ob_before.append(("insn", b.capstone.insns[-1].address, OP_BEFORE))   # all the return instruction address
+            ob_before.add(("insn", b.capstone.insns[-1].address, OP_BEFORE))   # all the return instruction address
 
         aset = set()
         aset.update(trans_points)
@@ -626,21 +676,23 @@ class WgetHandler(FunctionHandler):
             # b = local_function.get_block(c_t_node.addr)
             # ob_after.append(("insn", b.capstone.insns[-1].address, OP_AFTER))   # all the call&transition instruction address
             # use node level observe to record
-            ob_after.append(("node", c_t_node.addr, OP_AFTER))
+            ob_after.add(("node", c_t_node.addr, OP_AFTER))
 
         """3. pass the parent's structures and execute child RDA,
               it's important to observe those exit points for merge
         """
-        ob_points = ob_before + ob_after
+        ob_points = set().union(ob_before).union(ob_after)
+        parent_obpoints = parent_rda._observation_points
+
         child_rda = self.project.analyses.ReachingDefinitions(
             subject=local_function,
             func_graph=local_function.graph,
             max_iterations=parent_rda._max_iterations,
             track_tmps=parent_rda._track_tmps,
-            observation_points=ob_points,
+            observation_points=ob_points.union(parent_obpoints),
             init_state=parent_rdstate,
             cc=local_function.calling_convention,
-            function_handler=self,
+            function_handler=WgetHandler(),
             call_stack=parent_rda._call_stack,  # callstack <- [parent callstack] + [subject function]
             maximum_local_call_depth=parent_rda._maximum_local_call_depth,
             observe_all=parent_rda._observe_all,
@@ -669,6 +721,17 @@ class WgetHandler(FunctionHandler):
             live_defs = live_defs.merge(result_defs, overwrite=overwrite)
         child_rdstate.live_definitions = live_defs
 
+        """ update(feedback) parent's observation results"""
+        for k in parent_obpoints:
+            if k in child_rda.observed_results.keys():
+                res = child_rda.observed_results[k]
+                res = res if type(res) == list else [res]
+
+                if k in parent_rda.observed_results.keys():
+                    parent_rda.observed_results[k] += res
+                else:
+                    parent_rda.observed_results[k] = res
+
         return True, child_rdstate, child_rda.visited_blocks, child_rda.dep_graph
 
 
@@ -678,3 +741,70 @@ class WgetHandler(FunctionHandler):
             (isinstance(mem_addr, SpOffset) and isinstance(mem_addr.offset, int)) or
             (isinstance(mem_addr, HeapAddress) and isinstance(mem_addr.value, int))
         )
+
+    def more_transitive_closure(self, definitions: List[Definition],
+                                state: 'ReachingDefinitionsState',
+                                dep_graph: Optional['DepGraph']=None) -> networkx.DiGraph:
+
+        if not dep_graph:
+            dep_graph = state.dep_graph
+
+        closures: List[networkx.DiGraph] = list(map(lambda d: dep_graph.transitive_closure(d), definitions))
+        result = networkx.DiGraph()
+        for c in closures:
+            result.add_nodes_from(c.nodes())
+            result.add_edges_from(c.edges())
+        return result
+
+    def successor_closure(self, definition: Definition,
+                           dep_graph: 'DepGraph'=None,
+                           state:'ReachingDefinitionsState'=None) -> networkx.DiGraph:
+        """
+        Compute the "successor closure" of a given definition.
+        Obtained by transitively aggregating the successors of this definition in the graph.
+
+        Note: Each definition is memoized to avoid any kind of recomputation across the lifetime of this object.
+
+        :param definition:  The Definition to get transitive closure for.
+        :return:            A graph of the transitive closure of the given definition.
+        """
+        if not dep_graph:
+            dep_graph = state.dep_graph
+
+        def _transitive_closure(def_: Definition, graph: networkx.DiGraph, result: networkx.DiGraph,
+                                visited: Optional[Set[Definition]] = None):
+            """
+            Returns a joint graph that comprises the transitive closure of all defs that `def_` depends on and the
+            current graph `result`. `result` is updated.
+            """
+            if def_ in dep_graph._transitive_successor_closures.keys():
+                closure = dep_graph._transitive_successor_closures[def_]
+                # merge closure into result
+                result.add_edges_from(closure.edges())
+                return result
+
+            successors = list(graph.successors(def_))
+
+            result.add_node(def_)
+            result.add_edges_from(list(map(
+                lambda e: (*e, graph.get_edge_data(*e)),
+                map(
+                    lambda p: (def_, p),
+                    successors
+                )
+            )))
+
+            visited = visited or set()
+            visited.add(def_)
+            successors_to_visit = set(successors) - set(visited)
+
+            closure = reduce(
+                lambda acc, def0: _transitive_closure(def0, graph, acc, visited),
+                successors_to_visit,
+                result
+            )
+
+            dep_graph._transitive_successor_closures[def_] = closure
+            return closure
+
+        return _transitive_closure(definition, dep_graph.graph, networkx.DiGraph())

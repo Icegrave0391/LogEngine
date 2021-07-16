@@ -50,25 +50,6 @@ class InsnManager:
             abs_dir, exec_name[:idx] + ".pk"
         )
 
-    @deprecated(version="1.0", reason="filter exec from the raw_parser to save space.")
-    def proc_start_filter(self, exec, filter_insn=True, source=None):
-        log.info(f"Enabled process filter, to the start of process {exec}")
-        sources = self.origin_pt_stashes if not source else source
-        if filter_insn:
-            sources = self.filter_insn()
-        # locate to the start
-        loc = 0
-        for i in range(len(sources)):
-            insn = sources[i]
-            if exec == insn.exec:
-               loc = i
-               break
-
-        if not loc:
-            log.warning(f"Didn't find process start.")
-            return None
-        return sources[loc:]
-
     def filter_insn(self, stashes: Optional[List[InsnState]]=None):
         s = []
         origin_stashes = stashes if stashes is not None else self.origin_pt_stashes
@@ -108,3 +89,22 @@ class InsnManager:
             self.pickle_path = name
         with open(self.pickle_path, "w") as f:
             pickle.dump(stashes, f)
+
+    @deprecated(version="1.0", reason="filter exec from the raw_parser to save space.")
+    def proc_start_filter(self, exec, filter_insn=True, source=None):
+        log.info(f"Enabled process filter, to the start of process {exec}")
+        sources = self.origin_pt_stashes if not source else source
+        if filter_insn:
+            sources = self.filter_insn()
+        # locate to the start
+        loc = 0
+        for i in range(len(sources)):
+            insn = sources[i]
+            if exec == insn.exec:
+               loc = i
+               break
+
+        if not loc:
+            log.warning(f"Didn't find process start.")
+            return None
+        return sources[loc:]

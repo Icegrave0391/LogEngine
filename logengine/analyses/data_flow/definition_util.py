@@ -207,6 +207,9 @@ class DefinitionUtil:
             sp_addr = next(iter(sp_data))
             if isinstance(sp_addr, (int, SpOffset)):
                 sp_addr -= self.project.arch.stack_change
+                """debug"""
+                log.critical(f"[STACK DBG] return from plt {function.name}, stack: {sp_addr}")
+                """debug"""
             elif isinstance(sp_addr, Undefined):
                 pass
             else:

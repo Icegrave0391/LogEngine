@@ -67,6 +67,8 @@ class ExecutionGraphVisitor(GraphVisitor):
         :param node: The node to revisit in the future.
         :return:     None
         """
+        if not len(self._sequence_node_map):
+            return
         self._sanity_check(node)
         _, n = next(iter(self._sequence_node_map.items()))
         if self.successors(node)[0] != n:

@@ -7,6 +7,7 @@ import pygraphviz as pgv
 import networkx as nx
 import angr
 import os
+import logengine
 from typing import Any, Dict
 from pathlib import Path
 from networkx.drawing.nx_agraph import write_dot
@@ -17,6 +18,8 @@ from angr.knowledge_plugins.key_definitions.undefined import Undefined, UNDEFINE
 from angr.engines.light import RegisterOffset, SpOffset
 from angr.knowledge_plugins.key_definitions import LiveDefinitions
 from angr.knowledge_plugins.key_definitions.definition import Definition
+from angr.codenode import BlockNode
+from angr.knowledge_plugins.functions import Function
 
 def magic_graph_print(filename, dependency_graph):
     root_dir = "LogEngine"
@@ -40,12 +43,14 @@ class Visualize:
     def __init__(
         self,
         proj: angr.project,
-        exports: Dict[str, Any]=None
+        exports: Dict[str, Any]=None,
+        lp: logengine.Project=None
     ):
         self.proj: angr.Project = proj
         self.exports = exports if exports else {}
         self._root_dir = "LogEngine"
         self._file_dir = "graphs"
+        self.lp = lp
 
     def drawcfg(self, graph, start=None, end=None, name=None):
 
@@ -126,13 +131,19 @@ class Visualize:
                 s += " contextless"
             else:
                 cstr = ""
-                for c in codeloc.context:
-                    addr = hex(c)
-                    f = self.proj.kb.functions.function(addr=c)
-                    if f:
-                        addr += f"({f.name})"
-                    addr += ','
-                    cstr += addr
+                c = codeloc.context[-1]
+                addr = hex(c)
+                f = self.proj.kb.functions.function(addr=c)
+                if f:
+                    addr += f"({f.name})"
+                cstr += addr
+                # for c in codeloc.context:
+                #     addr = hex(c)
+                #     f = self.proj.kb.functions.function(addr=c)
+                #     if f:
+                #         addr += f"({f.name})"
+                #     addr += ','
+                #     cstr += addr
                 s += cstr
             ss = []
             if codeloc.info:
@@ -166,7 +177,39 @@ class Visualize:
         G.draw(drop + '.png', prog='dot')
         G.draw(drop + '.pdf', prog='dot')
 
+    def draw_funcgraph(self, function:Function, filename):
+        """
+        Draw the graph and save it to a PNG file.
+        """
+        import matplotlib.pyplot as pyplot  # pylint: disable=import-error
+        from networkx.drawing.nx_agraph import graphviz_layout  # pylint: disable=import-error
 
+        def node(n: BlockNode):
+            blk = self.proj.factory.block(n.addr)
+            lpblk = self.lp.blockrailset.get_block(n.addr)
+            addr = hex(n.addr)
+            insn_s = ""
+            for insn in blk.capstone.insns:
+                insn_desp = "%#x:\t%s\t%s" % (insn.address, insn.mnemonic, insn.op_str)
+                insn_s = (insn_s + insn_desp + '\n')
+            sym = lpblk.symbol if lpblk is not None else function.name
+            return "<"+addr + " " + sym+">" + "\n" + insn_s
+
+        tmp_graph = nx.DiGraph()
+        for from_block, to_block in function.transition_graph.edges():
+            node_a, node_b = node(from_block), node(to_block)
+            tmp_graph.add_edge(node_a, node_b)
+        # pos = graphviz_layout(tmp_graph, prog='fdp')   # pylint: disable=no-member
+        abs_dir = os.path.abspath(os.path.dirname(__name__))
+        abs_dir = abs_dir[: abs_dir.find(self._root_dir) + len(self._root_dir)]
+        abs_dir = os.path.join(abs_dir, self._file_dir)
+        if not os.path.exists(abs_dir):
+            os.makedirs(abs_dir)
+        drop = os.path.join(abs_dir, filename)
+        nx.drawing.nx_agraph.write_dot(tmp_graph, drop + '.dot')
+        G = pgv.AGraph(drop + '.dot')
+        G.draw(drop + '.png', prog='dot')
+        G.draw(drop + '.pdf', prog='dot')
 
     def drawddg(self, ddg, name=None):
 
