@@ -24,8 +24,8 @@
 --> |_ pt     
 --> |_ factory     
 --> |_ analyses     
--->  -->|_ execution_flow     
--->  -->|_ data_flow     
+------->|_ execution_flow     
+------->|_ data_flow     
 
 * Project：借鉴angr中的命名格式（阅读源码时注意区分`angr.Project`与`LogEngine.Project`，该项目与angr的Project模块采用相同的命名，并调用angr模块，确实容易混淆），作为分析的主控部分，与各个模块和功能进行交互。
 
